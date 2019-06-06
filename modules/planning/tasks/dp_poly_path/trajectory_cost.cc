@@ -188,15 +188,18 @@ ComparableCost TrajectoryCost::CalculateStaticObstacleCost(
 }
 
 ComparableCost TrajectoryCost::CalculateDynamicObstacleCost(
+    //计算动态障碍物的cost
     const QuinticPolynomialCurve1d &curve, const float start_s,
     const float end_s) const {
   ComparableCost obstacle_cost;
   float time_stamp = 0.0;
-  for (size_t index = 0; index < num_of_time_stamps_;
-       ++index, time_stamp += config_.eval_time_interval()) {
+  // num_of_time_stamps_是动态障碍物在未来一段时间位置预测的次数，每次隔0.1s预测一次
+  for (size_t index = 0; index < num_of_time_stamps_;++index, time_stamp += config_.eval_time_interval()) {
     common::SpeedPoint speed_point;
+	//求取在time_stamp处的speed_point
     heuristic_speed_data_.EvaluateByTime(time_stamp, &speed_point);
     float ref_s = speed_point.s() + init_sl_point_.s();
+	// ref_s < start_s说明在当前time_stamp处，障碍物在车辆的后方
     if (ref_s < start_s) {
       continue;
     }
