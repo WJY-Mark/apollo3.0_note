@@ -127,7 +127,7 @@ bool DPRoadGraph::GenerateMinCostPath(
   CHECK(min_cost_path != nullptr);
 
   // 获取采样点存储在path_waypoints中,path_waypoints可以看成一个表格,这个表格的每一行(层)就是一个纵向采样层,
-  // 每一行中的路径点就是在该纵向采样层上的横向采样点
+  // 每一行（也就是每一个纵向采样层）中的路径点就是在该纵向采样层上的横向采样点
   std::vector<std::vector<common::SLPoint>> path_waypoints;
   if (!SamplePathWaypoints(init_point_, &path_waypoints) ||
       path_waypoints.size() < 1) {
@@ -135,7 +135,7 @@ bool DPRoadGraph::GenerateMinCostPath(
            << reference_line_.Length();
     return false;
   }
-  // 完成采样,存储在了path_waypoints中,在path_waypoints的最开头再加一层,这一层只有一个点即规划的起始点
+  // 完成采样,存储在了path_waypoints中,在path_waypoints的最开头再加一层,这一层只有一个点,即规划的起始点
   path_waypoints.insert(path_waypoints.begin(),
                         std::vector<common::SLPoint>{init_sl_point_});
   const auto &vehicle_config =
@@ -155,7 +155,7 @@ bool DPRoadGraph::GenerateMinCostPath(
   // 第一行中插入第一个元素,这里调用DPRoadGraphNode的第三个构造函数; 进而也会调用ComparableCost类的默认构造函数
   graph_nodes.back().emplace_back(init_sl_point_, nullptr, ComparableCost()); 
 
-  // 取出graph_nodes表格的第一个元素,其实这个元素表示的就是第一层的那个init_point到它本身的cost
+  // 取出graph_nodes表格的第一个元素,其实这个node就包含第一层的那个init_point到它本身的cost
   auto &front = graph_nodes.front().front();
   
   // 总的层数,应该等于纵向采样层的层数,也即是path_waypoints的行数
@@ -166,11 +166,11 @@ bool DPRoadGraph::GenerateMinCostPath(
     const auto &prev_dp_nodes = graph_nodes.back();
 	// 取出当前层
     const auto &level_points = path_waypoints[level];
-    // graph_nodes中加入一行,初值为默认值
+    // graph_nodes中加入新的一行,初值为默认值,新加入的这一行的目的是为了存储根据当前level计算的node
     graph_nodes.emplace_back();
-    // 遍历取出的当前层level_points的所有路点,计算当前level中的点和前一层level中点之间的cost
+    // 遍历取出的当前层level_points的所有路点,计算当前level中的每一个点和前一层level中每个点两两之间的cost
     for (size_t i = 0; i < level_points.size(); ++i) {
-		// 取出当前层的第i个点
+	  // 取出当前层的第i个点
       const auto &cur_point = level_points[i];
       // 在graph_nodes的最新一行(即是上面新加入的默认值的那一行)中加入当前取出的点
       graph_nodes.back().emplace_back(cur_point, nullptr);
@@ -250,15 +250,20 @@ void DPRoadGraph::UpdateNode(const std::list<DPRoadGraphNode> &prev_nodes,
     if (!IsValidCurve(curve)) {
       continue;
     }
-	// 如果拟合出的曲线是有效的,开始计算上一层的某个点prev_sl_point到当前层的当前点cur_point的cost
+	// 如果拟合出的曲线是有效的
     const auto cost =
+         // Calculate(...)函数计算的是的上一层点prev_sl_point与当前点cur_point的cost
         trajectory_cost->Calculate(curve, prev_sl_point.s(), cur_point.s(),
-                                   level, total_level) +
+                                   level, total_level) +   
+        // 再加上prev_dp_node.min_cost,得到的是当前点cur_point与init_point之间的cost
         prev_dp_node.min_cost;
-
+    // 获取上一层所有的node中到当前层当前cur_node的最小cost的那个node,存储到min_cost_prev_node
     cur_node->UpdateCost(&prev_dp_node, curve, cost);
   }
+  // 这个循环结束,求取到了上一层所有node中到cur_node最小cost的点min_cost_prev_node。这个cost考虑了从init_point到上一层
+  // 每个node的cost
 
+  
   // try to connect the current point with the first point directly
   if (level >= 2) {
     const float init_dl = init_frenet_frame_point_.dl();
