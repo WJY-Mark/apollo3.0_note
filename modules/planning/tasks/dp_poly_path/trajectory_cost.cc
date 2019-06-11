@@ -219,7 +219,7 @@ ComparableCost TrajectoryCost::CalculateDynamicObstacleCost(
     if (ref_s < start_s) {
       continue;
     }
-	// ref_s < start_s说明在当前time_stamp处，车辆已经走过了拟合曲线curve的终点,那么再这个time_stamp之后,这段拟合曲线与障碍物的
+	// ref_s < start_s说明在当前time_stamp处，车辆已经走过了拟合曲线curve的终点,那么在这个time_stamp之后,这段拟合曲线与障碍物的
 	// 位置关系就不需要再考虑了,因为肯定撞不了
     if (ref_s > end_s) {
       break;

@@ -86,9 +86,10 @@ bool DPRoadGraph::FindPathTunnel(
   }
   // 将最优前进路线封装成path_data,路径点的形式为FrenetFramePoint(s ,l,dl,ddl)
   std::vector<common::FrenetFramePoint> frenet_path;
+  // 初始累计长度为本周期规划起始点的累计长度
   float accumulated_s = init_sl_point_.s();
-  const float path_resolution = config_.path_resolution();
-
+  const float path_resolution = config_.path_resolution();//1m
+  // 遍历min_cost_path中的每一个node
   for (std::size_t i = 1; i < min_cost_path.size(); ++i) {
     const auto &prev_node = min_cost_path[i - 1];
     const auto &cur_node = min_cost_path[i];
@@ -96,22 +97,33 @@ bool DPRoadGraph::FindPathTunnel(
 	// 前后两点之间的路径长度
     const float path_length = cur_node.sl_point.s() - prev_node.sl_point.s();
     float current_s = 0.0;
+	// 取出当前点 cur_node与上一层的最小cost对应的拟合曲线min_cost_curve
     const auto &curve = cur_node.min_cost_curve;
+	// 以path_resolution = 1m为间隔,对当前最小cost拟合曲线 curve进行插值
     while (current_s + path_resolution / 2.0 < path_length) {
+		// 求出插值点为current_s处的l,dl,ddl
       const float l = curve.Evaluate(0, current_s);
       const float dl = curve.Evaluate(1, current_s);
       const float ddl = curve.Evaluate(2, current_s);
       common::FrenetFramePoint frenet_frame_point;
+	  // 得到插值点
       frenet_frame_point.set_s(accumulated_s + current_s);
       frenet_frame_point.set_l(l);
       frenet_frame_point.set_dl(dl);
       frenet_frame_point.set_ddl(ddl);
+	  // 存储插值点
       frenet_path.push_back(std::move(frenet_frame_point));
       current_s += path_resolution;
     }
+	// 取到min_cost_path中最后一个点的时候,可能在min_cost_path中最后一个点与倒数第二点距离很近(< 0.5m)
+	//,就不会进入到上面的while,那么这个时候在倒数第二个点和倒数第一个点之间不会插值,当然最后一个点也不会进入到
+	// frenet_path,这个时候累计路径长度就是到倒数第二个点的累计路径长度,这个时候current_s = 0
+	
     if (i == min_cost_path.size() - 1) {
       accumulated_s += current_s;
-    } else {
+    }
+	// 如果不是min_cost_path的最后一个点,累计路径长度accumulated_s加上本段拟合曲线的长度得到当前的累计路径长度
+	else {
       accumulated_s += path_length;
     }
   }
@@ -196,20 +208,23 @@ bool DPRoadGraph::GenerateMinCostPath(
 
   // find best path
   DPRoadGraphNode fake_head;
+  // garph_nodes中的最后一层有多个采样点,所以最终形成的路径图graph_nodes中有多个终点,所以需要遍历这最后一层的
+  // 每个终点,得到cost最小的那条路径的终点,然后再从这个点往前回溯就得到了cost最小的那条路径。
   for (const auto &cur_dp_node : graph_nodes.back()) {
     fake_head.UpdateCost(&cur_dp_node, cur_dp_node.min_cost_curve,
                          cur_dp_node.min_cost);
   }
-
+  // 从cost最小的路径终点开始向前回溯得到一条反向的路径
   const auto *min_cost_node = &fake_head;
   while (min_cost_node->min_cost_prev_node) {
     min_cost_node = min_cost_node->min_cost_prev_node;
     min_cost_path->push_back(*min_cost_node);
   }
+  // 如果回溯得到的路径的第一个点不是graph_nodes第一行的第一个点(init_point),那么说明生成路径的过程中出错了
   if (min_cost_node != &graph_nodes.front().front()) {
     return false;
   }
-
+  // 反转得到最小cost路径
   std::reverse(min_cost_path->begin(), min_cost_path->end());
 
   for (const auto &node : *min_cost_path) {
@@ -261,9 +276,10 @@ void DPRoadGraph::UpdateNode(const std::list<DPRoadGraphNode> &prev_nodes,
     cur_node->UpdateCost(&prev_dp_node, curve, cost);
   }
   // 这个循环结束,求取到了上一层所有node中到cur_node最小cost的点min_cost_prev_node。这个cost考虑了从init_point到上一层
-  // 每个node的cost
+  // 每个node的cost,所以当前的cur_node中包含从init_point到它本身的最小cost,并且根据它的min_cost_prev_node回溯,就可以得到
+  // 从init_point到它的最小cost路径
 
-  
+  // 直连init_point和当前cur_node
   // try to connect the current point with the first point directly
   if (level >= 2) {
     const float init_dl = init_frenet_frame_point_.dl();
@@ -271,7 +287,7 @@ void DPRoadGraph::UpdateNode(const std::list<DPRoadGraphNode> &prev_nodes,
     QuinticPolynomialCurve1d curve(init_sl_point_.l(), init_dl, init_ddl,
                                    cur_node->sl_point.l(), 0.0, 0.0,
                                    cur_node->sl_point.s() - init_sl_point_.s());
-    // 如果曲
+    
 	if (!IsValidCurve(curve)) {
       return;
     }
