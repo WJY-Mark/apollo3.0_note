@@ -200,9 +200,10 @@ Status EMPlanner::PlanOnReferenceLine(
   heuristic_speed_data->set_speed_vector(speed_profile);
 
   auto ret = Status::OK();
-  // 各个任务产品开始执行
+  // 各个任务产品开始执行(已在Init中完成了初始化)
   for (auto& optimizer : tasks_) {
     const double start_timestamp = Clock::NowInSeconds();
+	// 执行任务产品:dp_poly_path,path_decider,dp_st_speed_optimizer
     ret = optimizer->Execute(frame, reference_line_info);
     if (!ret.ok()) {
       AERROR << "Failed to run tasks[" << optimizer->Name()

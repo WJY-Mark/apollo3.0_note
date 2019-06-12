@@ -36,7 +36,7 @@ using apollo::common::Status;
 
 DpPolyPathOptimizer::DpPolyPathOptimizer()
     : PathOptimizer("DpPolyPathOptimizer") {}
-// em_planner.cc 78行处调用
+// em_planner.cc 90行处调用
 bool DpPolyPathOptimizer::Init(const PlanningConfig &config) {
   // 获取配置信息完成初始化
   config_ = config.em_planner_config().dp_poly_path_config();
@@ -56,7 +56,7 @@ Status DpPolyPathOptimizer::Process(const SpeedData &speed_data,
   // reference_line_info_ 定义在Task中
   DPRoadGraph dp_road_graph(config_, *reference_line_info_, speed_data);
   dp_road_graph.SetDebugLogger(reference_line_info_->mutable_debug());
-  
+  // 进入到规划算法
   if (!dp_road_graph.FindPathTunnel(
           init_point,
           reference_line_info_->path_decision()->path_obstacles().Items(),

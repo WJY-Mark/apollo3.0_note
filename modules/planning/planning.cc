@@ -451,7 +451,7 @@ void Planning::RunOnce() {
       continue;
     }
   }
-
+  // 这里进入到规划的过程
   status = Plan(start_timestamp, stitching_trajectory, trajectory_pb);
   
   // 下面是对规划结果trajectory_pb的各种赋值
