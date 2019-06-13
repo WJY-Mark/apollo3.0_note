@@ -126,10 +126,11 @@ bool DpStSpeedOptimizer::SearchStGraph(
   return true;
 }
 
-Status DpStSpeedOptimizer::Process(const SLBoundary& adc_sl_boundary,
-                                   const PathData& path_data,
-                                   const TrajectoryPoint& init_point,
-                                   const ReferenceLine& reference_line,
+// 速度规划的入口
+Status DpStSpeedOptimizer::Process(const SLBoundary& adc_sl_boundary, // 车辆的sl_boundary
+                                   const PathData& path_data,            // 路径规划结果
+                                   const TrajectoryPoint& init_point,    // 路径规划起点
+                                   const ReferenceLine& reference_line,  // 
                                    const SpeedData& reference_speed_data,
                                    PathDecision* const path_decision,
                                    SpeedData* const speed_data) {
@@ -149,13 +150,14 @@ Status DpStSpeedOptimizer::Process(const SLBoundary& adc_sl_boundary,
 
   StBoundaryMapper boundary_mapper(
       adc_sl_boundary, st_boundary_config_, *reference_line_, path_data,
-      dp_st_speed_config_.total_path_length(), dp_st_speed_config_.total_time(),
+      dp_st_speed_config_.total_path_length(), dp_st_speed_config_.total_time(),//7.0s
       reference_line_info_->IsChangeLanePath());
 
   auto* debug = reference_line_info_->mutable_debug();
   STGraphDebug* st_graph_debug = debug->mutable_planning_data()->add_st_graph();
 
   path_decision->EraseStBoundaries();
+  // 
   if (boundary_mapper.CreateStBoundary(path_decision).code() ==
       ErrorCode::PLANNING_ERROR) {
     const std::string msg =

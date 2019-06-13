@@ -75,7 +75,7 @@ StBoundaryMapper::StBoundaryMapper(const SLBoundary& adc_sl_boundary,
 
 Status StBoundaryMapper::CreateStBoundary(PathDecision* path_decision) const {
   const auto& path_obstacles = path_decision->path_obstacles();
-
+  // planning_time_ = 7.0s
   if (planning_time_ < 0.0) {
     const std::string msg = "Fail to get params since planning_time_ < 0.";
     AERROR << msg;
@@ -92,10 +92,12 @@ Status StBoundaryMapper::CreateStBoundary(PathDecision* path_decision) const {
 
   PathObstacle* stop_obstacle = nullptr;
   ObjectDecisionType stop_decision;
-  double min_stop_s = std::numeric_limits<double>::max();
-
-  for (const auto* const_path_obstacle : path_obstacles.Items()) {
+  double min_stop_s = std::numeric_limits<double>::max();// min_stop_s被赋值为double类型的最大值
+  // 遍历路径上的每一个障碍物
+  for (const auto* const_path_obstacle : path_obstacles.Items()) {// item = {id,obstacle}
+  	// 按照ID查询出对应的障碍物path_obstacle
     auto* path_obstacle = path_decision->Find(const_path_obstacle->Id());
+	// 如果障碍物没有纵向决策标签
     if (!path_obstacle->HasLongitudinalDecision()) {
       if (!MapWithoutDecision(path_obstacle).ok()) {
         std::string msg = StrCat("Fail to map obstacle ", path_obstacle->Id(),
@@ -300,7 +302,7 @@ bool StBoundaryMapper::MapStopDecision(
 Status StBoundaryMapper::MapWithoutDecision(PathObstacle* path_obstacle) const {
   std::vector<STPoint> lower_points;
   std::vector<STPoint> upper_points;
-
+  
   if (!GetOverlapBoundaryPoints(path_data_.discretized_path().path_points(),
                                 *(path_obstacle->obstacle()), &upper_points,
                                 &lower_points)) {
@@ -338,28 +340,40 @@ bool StBoundaryMapper::GetOverlapBoundaryPoints(
     AERROR << "No points in path_data_.discretized_path().";
     return false;
   }
-
+  // 获取当前障碍物的预测轨迹点
   const auto& trajectory = obstacle.Trajectory();
+  // 如果障碍物预测轨迹的size为0,说明该障碍物没有预测轨迹,那么只考虑它本身所在的位置与车辆是否相撞即可
   if (trajectory.trajectory_point_size() == 0) {
     if (!obstacle.IsStatic()) {
       AWARN << "Non-static obstacle[" << obstacle.Id()
             << "] has NO prediction trajectory."
             << obstacle.Perception().ShortDebugString();
     }
+	// 遍历期望路径的每一个路径点
     for (const auto& curr_point_on_path : path_points) {
+	  // 如果期望路径点的累计长度s比期望路径的长度还大,说明这个路径点已经超出了当前周期期望路径的范围,
+	  // 就不用再考虑了(在计算期望路径的时候我们可以计算到很远的距离,但是在实际使用中,总是将其限定在某一长度
+	  // 之内,因为未来时刻环境会变化,当前周期计算得到的很远的路径点在未来时刻可能就不对了)
       if (curr_point_on_path.s() > planning_distance_) {
         break;
       }
+	  // 获取这个障碍物的box
       const Box2d obs_box = obstacle.PerceptionBoundingBox();
-
+      // 如果当前轨迹预测点curr_point_on_path的box(其实是车辆后轴中心在这个路径点时的box) 与障碍物的box有重叠
       if (CheckOverlap(curr_point_on_path, obs_box,
                        st_boundary_config_.boundary_buffer())) {
         const double backward_distance = -vehicle_param_.front_edge_to_center();
         const double forward_distance = vehicle_param_.length() +
                                         vehicle_param_.width() +
                                         obs_box.length() + obs_box.width();
-        double low_s =
+        // 不发生碰撞有两种情况:
+        // 1. 在当前时刻,车辆没有到达障碍物,对应车辆能至远够到达的位置极限位low_s,对应障碍物标定框的下界						
+        // low_s:车辆的后轴中心到达等于low_s的点时,车头恰好顶在障碍物上,所以low_s时这个障碍物的下边界
+        // 也就是说车辆如果走到curr_point_on_path就会和这个障碍物相撞,车辆最多走到low_s的情况下恰好和障碍物
+        // 不装,所以low_s就是这个障碍物运动的下界,关于low_s怎么求取看下面
+		double low_s =
             std::fmax(0.0, curr_point_on_path.s() + backward_distance);
+		// 2. 车辆已经超越了障碍物,对应车辆至少到达的位置位high_s,也就是障碍物的标定框上界
         double high_s = std::fmin(planning_distance_,
                                   curr_point_on_path.s() + forward_distance);
         lower_points->emplace_back(low_s, 0.0);
@@ -372,6 +386,8 @@ bool StBoundaryMapper::GetOverlapBoundaryPoints(
   } else {
     const int default_num_point = 50;
     DiscretizedPath discretized_path;
+	// 如果期望路径path_points中路径点的个数超过100个,那么对其重新采样,比如:path_points原来有200个点,那么
+	// 现在就每隔4个点采样一个点
     if (path_points.size() > 2 * default_num_point) {
       const int ratio = path_points.size() / default_num_point;
       std::vector<PathPoint> sampled_path_points;
@@ -384,25 +400,38 @@ bool StBoundaryMapper::GetOverlapBoundaryPoints(
     } else {
       discretized_path.set_path_points(path_points);
     }
+	// 遍历障碍物预测轨迹点的每一个点
     for (int i = 0; i < trajectory.trajectory_point_size(); ++i) {
       const auto& trajectory_point = trajectory.trajectory_point(i);
+	  
+	  // 构建障碍物在轨迹点trajectory_point(i)的box
       const Box2d obs_box = obstacle.GetBoundingBox(trajectory_point);
-
+      // 获取障碍物在轨迹点trajectory_point(i)的相对时间,相对于本周期规划起始点init_point的时间
       double trajectory_point_time = trajectory_point.relative_time();
       constexpr double kNegtiveTimeThreshold = -1.0;
+	  // 条件满足,说明这个障碍物轨迹点是在本周期起始时刻1s以前该障碍物所在的位置,那么这个预测轨迹点就不用考虑了
       if (trajectory_point_time < kNegtiveTimeThreshold) {
         continue;
       }
 
-      const double step_length = vehicle_param_.front_edge_to_center();
+      const double step_length = vehicle_param_.front_edge_to_center();// 车头到后轴中心的距离
+      // 遍历重新采样的离散路径discretized_path的所有路点,计算出和某个时刻障碍物obs_box有交叠的第一个路点
+      // 遍历路径时的采样步长为step_length
       for (double path_s = 0.0; path_s < discretized_path.Length();
            path_s += step_length) {
         const auto curr_adc_path_point = discretized_path.Evaluate(
             path_s + discretized_path.StartPoint().s());
+		// 判断curr_adc_path_point与障碍物轨迹预测点处的box是否重叠
         if (CheckOverlap(curr_adc_path_point, obs_box,
                          st_boundary_config_.boundary_buffer())) {
           // found overlap, start searching with higher resolution
+          // 因为这个路点时第一个与当前时刻障碍物有交叠的路点,所以上一个路点一定与障碍物没有交叠,而且路点采样的
+          // 步长时step_length,所以从第一个与障碍物有交叠的路点减去step_length对应的那个s一定与障碍物没有交叠,作为
+          // 当前时刻障碍物标定框的粗略下界
           const double backward_distance = -step_length;
+		  // 对应于最极限的情况,沿着路径的方向,车辆右前角撞到了障碍物的左后角,那么车辆所在路点加上车辆和障碍物的
+		  // box的对角线长度就是车辆恰好超越障碍物不发生碰撞,所以这里这样设置forward_distance肯定能够保证车辆超越
+		  // 障碍物不发生碰撞
           const double forward_distance = vehicle_param_.length() +
                                           vehicle_param_.width() +
                                           obs_box.length() + obs_box.width();
@@ -413,9 +442,13 @@ bool StBoundaryMapper::GetOverlapBoundaryPoints(
           bool find_low = false;
           bool find_high = false;
           double low_s = std::fmax(0.0, path_s + backward_distance);
+		  // 如果车辆box和障碍物box重叠,那么车辆所在路点path_s加上forward_distance 肯定能够超越障碍物,
+		  // 绝对不会碰撞,但是加上forward_distance有可能加的大多了,也就是说在一些情况下,不用加上forward_distance
+		  // 这么大的数,就能够保证车辆与障碍物的box不重叠
           double high_s =
               std::fmin(discretized_path.Length(), path_s + forward_distance);
-
+          // 所以在这里采用步步紧逼的方法逐步降低high_s,增大low_s,从而得到一个较小的又不会碰撞的障碍物标定框，
+          // 给速度规划留下更大的空间
           while (low_s < high_s) {
             if (find_low && find_high) {
               break;
@@ -441,6 +474,10 @@ bool StBoundaryMapper::GetOverlapBoundaryPoints(
               }
             }
           }
+		 // 到此处得到某个障碍物obs_box相对于curr_adc_path_point更加精细的障碍物标定框的上下界,这个上下界就是
+		 // 某个时刻的障碍物预测位置标定框的上下界
+		  
+		  // 下面将上下界保存到lower_points和upper_points,作为
           if (find_high && find_low) {
             lower_points->emplace_back(
                 low_s - st_boundary_config_.point_extension(),
@@ -452,7 +489,9 @@ bool StBoundaryMapper::GetOverlapBoundaryPoints(
           break;
         }
       }
+	  // 这里完成的是求取某个时刻障碍物预测轨迹点的上下界标定框
     }
+	// 这里完成的是障碍物预测轨迹上所有预测轨迹点的上下界标定框
   }
   DCHECK_EQ(lower_points->size(), upper_points->size());
   return (lower_points->size() > 1 && upper_points->size() > 1);
@@ -467,7 +506,8 @@ Status StBoundaryMapper::MapWithDecision(
 
   std::vector<STPoint> lower_points;
   std::vector<STPoint> upper_points;
-
+  // 基于障碍物path_obstacle->obstacle()的预测轨迹和期望路径path_points()来构建该障碍物轨迹上每一个预测轨迹点的
+  // 标定框上下界
   if (!GetOverlapBoundaryPoints(path_data_.discretized_path().path_points(),
                                 *(path_obstacle->obstacle()), &upper_points,
                                 &lower_points)) {
@@ -523,6 +563,7 @@ bool StBoundaryMapper::CheckOverlap(const PathPoint& path_point,
   double left_delta_l = 0.0;
   double right_delta_l = 0.0;
   if (is_change_lane_) {
+  	// 大于0,说明车辆偏向reference_line的左边,小于0,偏向右边
     if ((adc_sl_boundary_.start_l() + adc_sl_boundary_.end_l()) / 2.0 > 0.0) {
       // change to right
       left_delta_l = 1.0;
@@ -531,6 +572,7 @@ bool StBoundaryMapper::CheckOverlap(const PathPoint& path_point,
       right_delta_l = 1.0;
     }
   }
+  // 车辆的后轴中心到几何中心的向量
   Vec2d vec_to_center =
       Vec2d((vehicle_param_.front_edge_to_center() -
              vehicle_param_.back_edge_to_center()) /
@@ -539,8 +581,9 @@ bool StBoundaryMapper::CheckOverlap(const PathPoint& path_point,
              vehicle_param_.right_edge_to_center() + right_delta_l) /
                 2.0)
           .rotate(path_point.theta());
+  // 车辆在path_point这个点的时候的几何中心位置
   Vec2d center = Vec2d(path_point.x(), path_point.y()) + vec_to_center;
-
+  // 以车辆几何中心和车长车宽以及车辆航向构建的box
   const Box2d adc_box =
       Box2d(center, path_point.theta(), vehicle_param_.length() + 2 * buffer,
             vehicle_param_.width() + 2 * buffer);

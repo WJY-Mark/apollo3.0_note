@@ -205,6 +205,7 @@ Status EMPlanner::PlanOnReferenceLine(
     const double start_timestamp = Clock::NowInSeconds();
 	// 执行任务产品:dp_poly_path,path_decider,dp_st_speed_optimizer
     ret = optimizer->Execute(frame, reference_line_info);
+  
     if (!ret.ok()) {
       AERROR << "Failed to run tasks[" << optimizer->Name()
              << "], Error message: " << ret.error_message();
