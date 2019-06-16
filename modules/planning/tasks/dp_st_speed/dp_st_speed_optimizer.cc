@@ -59,8 +59,10 @@ bool DpStSpeedOptimizer::SearchStGraph(
     SpeedData* speed_data, PathDecision* path_decision,
     STGraphDebug* st_graph_debug) const {
   std::vector<const StBoundary*> boundaries;
+  // 遍历期望路劲上的每一个障碍物
   for (auto* obstacle : path_decision->path_obstacles().Items()) {
     auto id = obstacle->Id();
+	// 如果障碍物的st框存在
     if (!obstacle->st_boundary().IsEmpty()) {
       if (obstacle->st_boundary().boundary_type() ==
           StBoundary::BoundaryType::KEEP_CLEAR) {
@@ -69,7 +71,8 @@ bool DpStSpeedOptimizer::SearchStGraph(
         path_decision->Find(id)->SetBlockingObstacle(true);
       }
       boundaries.push_back(&obstacle->st_boundary());
-    } else if (FLAGS_enable_side_vehicle_st_boundary &&
+    } 
+	else if (FLAGS_enable_side_vehicle_st_boundary &&
                (adc_sl_boundary_.start_l() > 2.0 ||
                 adc_sl_boundary_.end_l() < -2.0)) {
       if (path_decision->Find(id)->reference_line_st_boundary().IsEmpty()) {
@@ -141,13 +144,13 @@ Status DpStSpeedOptimizer::Process(const SLBoundary& adc_sl_boundary, // 车辆�
   init_point_ = init_point;
   adc_sl_boundary_ = adc_sl_boundary;
   reference_line_ = &reference_line;
-
+  // 如果规划的期望路径离散路点的个数为0,说明没有路径来进行速度规划,那么就直接返回错误状态
   if (path_data.discretized_path().NumOfPoints() == 0) {
     std::string msg("Empty path data");
     AERROR << msg;
     return Status(ErrorCode::PLANNING_ERROR, msg);
   }
-
+  // 构造一个StBoundaryMapper的对象
   StBoundaryMapper boundary_mapper(
       adc_sl_boundary, st_boundary_config_, *reference_line_, path_data,
       dp_st_speed_config_.total_path_length(), dp_st_speed_config_.total_time(),//7.0s
@@ -157,7 +160,8 @@ Status DpStSpeedOptimizer::Process(const SLBoundary& adc_sl_boundary, // 车辆�
   STGraphDebug* st_graph_debug = debug->mutable_planning_data()->add_st_graph();
 
   path_decision->EraseStBoundaries();
-  // 
+  // 判断条件中会为没有纵向决策标签的障碍物创建st框;给有纵向决策标签的障碍物也创建st框,并标定这些框的类型为:
+  // STOP,FOLLOW,OVERTAKE,YIELD
   if (boundary_mapper.CreateStBoundary(path_decision).code() ==
       ErrorCode::PLANNING_ERROR) {
     const std::string msg =

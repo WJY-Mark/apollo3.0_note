@@ -199,24 +199,32 @@ void Polygon2d::BuildFromPoints() {
   CHECK_GE(num_points_, 3);
 
   // Make sure the points are in ccw order.
+  // 确保顶点的顺序按照逆时针方向排列下面的计算采正确(这里肯定是逆时针排列的,因为排列的时候是先按照时间戳从小到大的
+  // 顺序存储点对的下界点,然后按照时间戳从大到小的顺序存储点对的上界点)
   area_ = 0.0;
+  // 计算多边形面积的2倍
   for (int i = 1; i < num_points_; ++i) {
     area_ += CrossProd(points_[0], points_[i - 1], points_[i]);
   }
+  // 小于0 ,说明点是按照顺时针方向排列的,所以需要倒过来
   if (area_ < 0) {
     area_ = -area_;
     std::reverse(points_.begin(), points_.end());
   }
+  // 多边形的面积
   area_ /= 2.0;
+  
   CHECK_GT(area_, kMathEpsilon);
 
   // Construct line_segments.
+  // 构造多边形的构成多边形的边,存入到向量line_segments_
   line_segments_.reserve(num_points_);
   for (int i = 0; i < num_points_; ++i) {
     line_segments_.emplace_back(points_[i], points_[Next(i)]);
   }
 
   // Check convexity.
+  // 判断是否为凸多变形,判断结果存储到is_convex_
   is_convex_ = true;
   for (int i = 0; i < num_points_; ++i) {
     if (CrossProd(points_[Prev(i)], points_[i], points_[Next(i)]) <=
@@ -231,6 +239,7 @@ void Polygon2d::BuildFromPoints() {
   max_x_ = points_[0].x();
   min_y_ = points_[0].y();
   max_y_ = points_[0].y();
+  // 找到多边形所有顶点中最小的x,最大的x,最小的y,最大的y
   for (const auto &point : points_) {
     min_x_ = std::min(min_x_, point.x());
     max_x_ = std::max(max_x_, point.x());

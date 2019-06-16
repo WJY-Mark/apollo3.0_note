@@ -105,6 +105,7 @@ bool PathData::GetPathPointWithRefS(const double ref_s,
   DCHECK_NOTNULL(path_point);
   DCHECK_EQ(discretized_path_.path_points().size(),
             frenet_path_.points().size());
+  // ref_s 以车辆的后轴中心为原点
   if (ref_s < 0) {
     AERROR << "ref_s[" << ref_s << "] should be > 0";
     return false;

@@ -95,18 +95,24 @@ double LineSegment2d::DistanceTo(const Vec2d &point,
 }
 
 double LineSegment2d::DistanceSquareTo(const Vec2d &point) const {
+  // 如果线段的长度很短,那么线段到点的距离就是点到线段的起点的距离
   if (length_ <= kMathEpsilon) {
     return point.DistanceSquareTo(start_);
   }
+  // 计算线段起点到点的向量(x0,y0)
   const double x0 = point.x() - start_.x();
   const double y0 = point.y() - start_.y();
+  // 计算向量(x0,y0)与线段单位向量的点积
   const double proj = x0 * unit_direction_.x() + y0 * unit_direction_.y();
+  // 如果点积小于0,说明点在线段的起点之外,那么线段到点的距离就是线段起点到点的距离
   if (proj <= 0.0) {
     return Square(x0) + Square(y0);
   }
+  // 如果点积大于线段长度,说明点在线段的终点之外,那么线段到点的距离就是线段终点到点的距离
   if (proj >= length_) {
     return point.DistanceSquareTo(end_);
   }
+  // 如果点积在(0,length_),说明点在线段的起始点之间,那么线段到点的距离就是向量(x0,y0)与线段单位向量的叉乘
   return Square(x0 * unit_direction_.y() - y0 * unit_direction_.x());
 }
 

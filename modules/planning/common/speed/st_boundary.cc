@@ -35,24 +35,24 @@ using common::math::Vec2d;
 StBoundary::StBoundary(
     const std::vector<std::pair<STPoint, STPoint>>& point_pairs) {
   CHECK(IsValid(point_pairs)) << "The input point_pairs are NOT valid";
-
   std::vector<std::pair<STPoint, STPoint>> reduced_pairs(point_pairs);
+  // 删除不必要的点对
   RemoveRedundantPoints(&reduced_pairs);
-
+  // 按照时间戳,将删减后留下的点对,分别保存到lower_points_和upper_points_中,即相同时间戳保存在列表的相同位置
   for (const auto& item : reduced_pairs) {
     // use same t for both points
     const double t = item.first.t();
     lower_points_.emplace_back(item.first.s(), t);
     upper_points_.emplace_back(item.second.s(), t);
   }
-
+ // 所有的点都保存到多边形顶点向量points_中
   for (auto it = lower_points_.begin(); it != lower_points_.end(); ++it) {
     points_.emplace_back(it->x(), it->y());
   }
   for (auto rit = upper_points_.rbegin(); rit != upper_points_.rend(); ++rit) {
     points_.emplace_back(rit->x(), rit->y());
   }
-
+  // 从所保存的顶点构建多边形
   BuildFromPoints();
 
   for (const auto& point : lower_points_) {
@@ -67,6 +67,7 @@ StBoundary::StBoundary(
 
 bool StBoundary::IsPointNear(const common::math::LineSegment2d& seg,
                              const Vec2d& point, const double max_dist) {
+  // 返回线段到点的距离的平方是否小于最大距离max_dist(0.1)的平方
   return seg.DistanceSquareTo(point) < max_dist * max_dist;
 }
 
@@ -90,6 +91,8 @@ std::string StBoundary::TypeName(BoundaryType type) {
 }
 
 void StBoundary::RemoveRedundantPoints(
+  // 这个函数的目的是删除不必要的上下界点对.比如:[<(1,1),(1,2)>,<(2,2),(2,3)>,<(3,3),(3,4)>,<(4,4),(4,7)>,<(5,5),(5,6)>]
+  // 就会删除<(2,2),(2,3)>这个点对
     std::vector<std::pair<STPoint, STPoint>>* point_pairs) {
   if (!point_pairs || point_pairs->size() <= 2) {
     return;
@@ -98,14 +101,21 @@ void StBoundary::RemoveRedundantPoints(
   const double kMaxDist = 0.1;
   size_t i = 0;
   size_t j = 1;
-
-  while (i < point_pairs->size() && j + 1 < point_pairs->size()) {
+  // 每次取出第i个和第i+2(j+1)个障碍物上下界点对:比如(0和2),(1和3)
+  while (i < point_pairs->size() && j + 1 < point_pairs->size()) 
+  {
+  	// 求取两个点对的下界点组成的线段
     LineSegment2d lower_seg(point_pairs->at(i).first,
                             point_pairs->at(j + 1).first);
+	// 求取两个点对的上界点组成的线段
     LineSegment2d upper_seg(point_pairs->at(i).second,
                             point_pairs->at(j + 1).second);
+	// 判断线段lower_seg 到 第i+1(j)个的点对的下界点是否非常接近或者线段upper_seg与第i+1(j)个的点对的上界点非常接近
+	// 判断标准为线段到点的距离的平方小于最大值kMaxDist(0.1)。
+	// 如果二者中有一个不是在线段附近,那么说明第j条线段需要保留
     if (!IsPointNear(lower_seg, point_pairs->at(j).first, kMaxDist) ||
-        !IsPointNear(upper_seg, point_pairs->at(j).second, kMaxDist)) {
+        !IsPointNear(upper_seg, point_pairs->at(j).second, kMaxDist)) 
+    {
       ++i;
       if (i != j) {
         point_pairs->at(i) = point_pairs->at(j);
@@ -363,14 +373,15 @@ bool StBoundary::GetIndexRange(const std::vector<STPoint>& points,
   return true;
 }
 
-StBoundary StBoundary::GenerateStBoundary(
-    const std::vector<STPoint>& lower_points,
-    const std::vector<STPoint>& upper_points) {
+StBoundary StBoundary::GenerateStBoundary(const std::vector<STPoint>& lower_points,
+                                                   const std::vector<STPoint>& upper_points) 
+{ // 必须保证 标定框上下界点的 个数要一致
   if (lower_points.size() != upper_points.size() || lower_points.size() < 2) {
     return StBoundary();
   }
-
+  
   std::vector<std::pair<STPoint, STPoint>> point_pairs;
+  // 把标定框上下界点列表中对应的点组成一对,然后存储到点对列表point_pairs中
   for (size_t i = 0; i < lower_points.size() && i < upper_points.size(); ++i) {
     point_pairs.emplace_back(
         STPoint(lower_points.at(i).s(), lower_points.at(i).t()),

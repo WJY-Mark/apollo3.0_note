@@ -412,6 +412,7 @@ bool PathObstacle::HasLateralDecision() const {
 }
 
 bool PathObstacle::HasLongitudinalDecision() const {
+// 当障碍物纵向决策标签为 NOT_SET 时, 返回值为false
   return longitudinal_decision_.object_tag_case() !=
          ObjectDecisionType::OBJECT_TAG_NOT_SET;
 }
