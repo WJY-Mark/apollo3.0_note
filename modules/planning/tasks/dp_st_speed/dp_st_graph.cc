@@ -73,24 +73,29 @@ DpStGraph::DpStGraph(const StGraphData& st_graph_data,
   dp_st_speed_config_.set_total_path_length(
       std::fmin(dp_st_speed_config_.total_path_length(),
                 st_graph_data_.path_data_length()));
-  unit_s_ = dp_st_speed_config_.total_path_length() /
-            (dp_st_speed_config_.matrix_dimension_s() - 1);
-  unit_t_ = dp_st_speed_config_.total_time() /
-            (dp_st_speed_config_.matrix_dimension_t() - 1);
+  unit_s_ = dp_st_speed_config_.total_path_length() /       // total_path_length() = 149
+            (dp_st_speed_config_.matrix_dimension_s() - 1); // matrix_dimension_s() = 150 // 矩阵的列数
+  unit_t_ = dp_st_speed_config_.total_time() /              // total_time() = 7.0 
+            (dp_st_speed_config_.matrix_dimension_t() - 1); // matrix_dimension_t() = 8  //矩阵的行数
 }
 
 Status DpStGraph::Search(SpeedData* const speed_data) {
+// 在st图上搜索速度曲线
   constexpr float kBounadryEpsilon = 1e-2;
+  // 遍历每个st框
   for (const auto& boundary : st_graph_data_.st_boundaries()) {
+  	// 如果st框的类型为KEEP_CLEAR,那么就忽略这个框
     if (boundary->boundary_type() == StBoundary::BoundaryType::KEEP_CLEAR) {
       continue;
     }
+	 // 如果坐标原点在boundary上或者(min_t和min_s都非常接近原点),说明在这种情况下,车辆基本上被这个boundary挡住了
     if (boundary->IsPointInBoundary({0.0, 0.0}) ||
         (std::fabs(boundary->min_t()) < kBounadryEpsilon &&
          std::fabs(boundary->min_s()) < kBounadryEpsilon)) {
       std::vector<SpeedPoint> speed_profile;
       float t = 0.0;
-      for (int i = 0; i < dp_st_speed_config_.matrix_dimension_t();
+	  // 所以,每一时刻的速度都赋值为0,步长为unit_t_ = 1,直接得到了速度规划的结果
+      for (int i = 0; i < dp_st_speed_config_.matrix_dimension_t();  //matrix_dimension_t() = 8
            ++i, t += unit_t_) {
         SpeedPoint speed_point;
         speed_point.set_s(0.0);
@@ -101,7 +106,7 @@ Status DpStGraph::Search(SpeedData* const speed_data) {
       return Status::OK();
     }
   }
-
+  // 如果st_boundaries为空, 说明在本周期中没有得到障碍物的boundary
   if (st_graph_data_.st_boundaries().empty()) {
     ADEBUG << "No path obstacles, dp_st_graph output default speed profile.";
     std::vector<SpeedPoint> speed_profile;

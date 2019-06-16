@@ -51,16 +51,22 @@ SpeedLimitDecider::SpeedLimitDecider(const SLBoundary& adc_sl_boundary,
 }
 
 void SpeedLimitDecider::GetAvgKappa(
+  // 这个函数的功能是求出每个离散路径点的平均曲率
     const std::vector<common::PathPoint>& path_points,
     std::vector<double>* kappa) const {
   CHECK_NOTNULL(kappa);
-  const int kHalfNumPoints = st_boundary_config_.num_points_to_avg_kappa() / 2;
+  const int kHalfNumPoints = st_boundary_config_.num_points_to_avg_kappa() / 2; // 2/2
   CHECK_GT(kHalfNumPoints, 0);
   kappa->clear();
   kappa->resize(path_points.size());
   double sum = 0.0;
   int start = 0;
   int end = 0;
+  // 计算规律：
+  // iter = 0：start = 0    end = 3   sum = path_points[0+1+2]     kappa[0] = sum/2
+  // iter = 1：start = 0    end = 4   sum = path_points[0+1+2+3]   kappa[0] = sum/3
+  // iter = 2：start = 1    end = 5   sum = path_points[1+2+3+4]   kappa[0] = sum/4
+  // iter = 3：start = 2    end = 6   sum = path_points[2+3+4+5]   kappa[0] = sum/4
   while (end < static_cast<int>(path_points.size()) &&
          end - start < kHalfNumPoints + 1) {
     sum += path_points[end].kappa();
@@ -88,10 +94,14 @@ Status SpeedLimitDecider::GetSpeedLimits(
   CHECK_NOTNULL(speed_limit_data);
 
   std::vector<double> avg_kappa;
+  // 计算路径点的平均曲率 存储到 avg_kappa向量中
   GetAvgKappa(path_data_.discretized_path().path_points(), &avg_kappa);
+  // 以init_point为起点的路径
   const auto& discretized_path_points =
       path_data_.discretized_path().path_points();
+  // 以车辆后轴中心为起点的路径
   const auto& frenet_path_points = path_data_.frenet_frame_path().points();
+  
   for (uint32_t i = 0; i < discretized_path_points.size(); ++i) {
     const double path_s = discretized_path_points.at(i).s();
     const double frenet_point_s = frenet_path_points.at(i).s();
@@ -102,12 +112,12 @@ Status SpeedLimitDecider::GetSpeedLimits(
       break;
     }
 
-    // (1) speed limit from map
+    // (1) speed limit from map // 来自地图的速度限制
     double speed_limit_on_reference_line =
         reference_line_.GetSpeedLimitFromS(frenet_point_s);
 
-    // (2) speed limit from path curvature
-    //  -- 2.1: limit by centripetal force (acceleration)
+    // (2) speed limit from path curvature 道路曲率速度限制
+    //  -- 2.1: limit by centripetal force (acceleration) // 向心加速度限制
     const double centri_acc_speed_limit =
         std::sqrt(GetCentricAccLimit(std::fabs(avg_kappa[i])) /
                   std::fmax(std::fabs(avg_kappa[i]),

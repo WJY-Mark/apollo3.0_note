@@ -64,6 +64,7 @@ bool DpStSpeedOptimizer::SearchStGraph(
     auto id = obstacle->Id();
 	// 如果障碍物的st框存在
     if (!obstacle->st_boundary().IsEmpty()) {
+		// 如果障碍物的st框类型为KEEP_CLEAR, 那么该障碍物就不是阻挡障碍物
       if (obstacle->st_boundary().boundary_type() ==
           StBoundary::BoundaryType::KEEP_CLEAR) {
         path_decision->Find(id)->SetBlockingObstacle(false);
@@ -72,7 +73,7 @@ bool DpStSpeedOptimizer::SearchStGraph(
       }
       boundaries.push_back(&obstacle->st_boundary());
     } 
-	else if (FLAGS_enable_side_vehicle_st_boundary &&
+	else if (FLAGS_enable_side_vehicle_st_boundary &&  //FLAGS_enable_side_vehicle_st_boundary = false
                (adc_sl_boundary_.start_l() > 2.0 ||
                 adc_sl_boundary_.end_l() < -2.0)) {
       if (path_decision->Find(id)->reference_line_st_boundary().IsEmpty()) {
@@ -104,6 +105,7 @@ bool DpStSpeedOptimizer::SearchStGraph(
   }
 
   // step 2 perform graph search
+  // 获取速度限制
   SpeedLimit speed_limit;
   if (!speed_limit_decider
            .GetSpeedLimits(path_decision->path_obstacles(), &speed_limit)
@@ -113,6 +115,7 @@ bool DpStSpeedOptimizer::SearchStGraph(
   }
 
   const float path_length = path_data.discretized_path().Length();
+  // 构造St图
   StGraphData st_graph_data(boundaries, init_point_, speed_limit, path_length);
 
   DpStGraph st_graph(
