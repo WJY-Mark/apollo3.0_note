@@ -152,17 +152,22 @@ Status DpStGraph::InitCostTable() {
   uint32_t dim_t = dp_st_speed_config_.matrix_dimension_t();
   DCHECK_GT(dim_s, 2);
   DCHECK_GT(dim_t, 2);
+  // cost_table_是一个以vector形式存储的矩阵,其中同一行表示的是在相同的t下的不同s,这个矩阵8行150列,这里使用
+  // StGraphPoint()来初始化矩阵的每一个元素
   cost_table_ = std::vector<std::vector<StGraphPoint>>(
       dim_t, std::vector<StGraphPoint>(dim_s, StGraphPoint()));
 
   float curr_t = 0.0;
+  // 遍历每一行
   for (uint32_t i = 0; i < cost_table_.size(); ++i, curr_t += unit_t_) {
     auto& cost_table_i = cost_table_[i];
     float curr_s = 0.0;
+    // 遍历每一列 赋值每一个矩阵元素的 s,t
     for (uint32_t j = 0; j < cost_table_i.size(); ++j, curr_s += unit_s_) {
       cost_table_i[j].Init(i, j, STPoint(curr_s, curr_t));
     }
   }
+  // 得到一个矩阵cost_table_
   return Status::OK();
 }
 
@@ -172,19 +177,21 @@ Status DpStGraph::CalculateTotalCost() {
   // s corresponding to row
   uint32_t next_highest_row = 0;
   uint32_t next_lowest_row = 0;
-
+  // 遍历 cost_table_ 的每一行
   for (size_t c = 0; c < cost_table_.size(); ++c) {
     int highest_row = 0;
     int lowest_row = cost_table_.back().size() - 1;
-
+    // 遍历cost_table_ 的每一列
     for (uint32_t r = next_lowest_row; r <= next_highest_row; ++r) {
       if (FLAGS_enable_multi_thread_in_dp_st_graph) {
         PlanningThreadPool::instance()->Push(
             std::bind(&DpStGraph::CalculateCostAt, this, c, r));
       } else {
+	  	// 计算在第c行,第r列的元素的cost
         CalculateCostAt(c, r);
       }
     }
+	// 到此处,计算完成第c行的每一个元素的cost
     if (FLAGS_enable_multi_thread_in_dp_st_graph) {
       PlanningThreadPool::instance()->Synchronize();
     }
@@ -240,7 +247,9 @@ void DpStGraph::GetRowRange(const StGraphPoint& point, int* next_highest_row,
 
 void DpStGraph::CalculateCostAt(const uint32_t c, const uint32_t r) {
   auto& cost_cr = cost_table_[c][r];
-  cost_cr.SetObstacleCost(dp_st_cost_.GetObstacleCost(cost_cr));
+  // 计算得到cost_table_[c][r] 的 障碍物cost,在计算是需要考虑cost_cr对应时刻的所有障碍物
+  cost_cr.SetObstacleCost(dp_st_cost_.GetObstacleCost(cost_cr)); 
+  // cost无穷大,直接返回(说明cost_cr对应的s直接落在的某个障碍物的boundary内部)
   if (cost_cr.obstacle_cost() > std::numeric_limits<float>::max()) {
     return;
   }

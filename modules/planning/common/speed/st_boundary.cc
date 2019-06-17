@@ -173,6 +173,7 @@ bool StBoundary::IsPointInBoundary(const STPoint& st_point) const {
   }
   size_t left = 0;
   size_t right = 0;
+  // lower_points_ 是多边形的下界点组成的向量
   if (!GetIndexRange(lower_points_, st_point.t(), &left, &right)) {
     AERROR << "fait to get index range.";
     return false;
@@ -355,11 +356,15 @@ bool StBoundary::GetIndexRange(const std::vector<STPoint>& points,
                                size_t* right) const {
   CHECK_NOTNULL(left);
   CHECK_NOTNULL(right);
+  // 时间t小于界点points向量的第一个点的时间,或者时间t大于界点points向量的最后一个点的时间,都说明该时间t对应的点
+  // 不在界点points范围之内
   if (t < points.front().t() || t > points.back().t()) {
     AERROR << "t is out of range. t = " << t;
     return false;
   }
+  // 匿名函数,如果p点对应的时间小于时间t,返回true
   auto comp = [](const STPoint& p, const double t) { return p.t() < t; };
+  // 得到在point中第一个满足comp匿名函数的点的位置
   auto first_ge = std::lower_bound(points.begin(), points.end(), t, comp);
   size_t index = std::distance(points.begin(), first_ge);
   if (index == 0) {
