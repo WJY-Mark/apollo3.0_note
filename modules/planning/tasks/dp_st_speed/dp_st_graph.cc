@@ -79,8 +79,9 @@ DpStGraph::DpStGraph(const StGraphData& st_graph_data,
             (dp_st_speed_config_.matrix_dimension_t() - 1); // matrix_dimension_t() = 8  //矩阵的行数
 }
 
+
+// 这个函数的作用时在st图上搜索速度曲线
 Status DpStGraph::Search(SpeedData* const speed_data) {
-// 在st图上搜索速度曲线
   constexpr float kBounadryEpsilon = 1e-2;
   // 遍历每个st框
   for (const auto& boundary : st_graph_data_.st_boundaries()) {
@@ -94,39 +95,45 @@ Status DpStGraph::Search(SpeedData* const speed_data) {
          std::fabs(boundary->min_s()) < kBounadryEpsilon)) {
       std::vector<SpeedPoint> speed_profile;
       float t = 0.0;
-	  // 所以,每一时刻的速度都赋值为0,步长为unit_t_ = 1,直接得到了速度规划的结果
-      for (int i = 0; i < dp_st_speed_config_.matrix_dimension_t();  //matrix_dimension_t() = 8
+	  // 所以,每一时刻的速度都赋值为0,步长为unit_t_,直接得到了速度规划的结果
+	  // unit_t_ = 1, matrix_dimension_t() = 8
+      for (int i = 0; i < dp_st_speed_config_.matrix_dimension_t(); 
            ++i, t += unit_t_) {
         SpeedPoint speed_point;
         speed_point.set_s(0.0);
         speed_point.set_t(t);
         speed_profile.emplace_back(speed_point);
       }
+      // 将速度规划的结果speed_profile赋值给speed_data(其实speed_profile并不是一条曲线,在时间域上是从0到7,但是每个s都是0)
       speed_data->set_speed_vector(speed_profile);
       return Status::OK();
     }
   }
-  // 如果st_boundaries为空, 说明在本周期中没有得到障碍物的boundary
+  // 如果st_boundaries为空, 说明在本周期中没有得到障碍物的boundary,也就是没有障碍物影响到车辆的速度规划
   if (st_graph_data_.st_boundaries().empty()) {
     ADEBUG << "No path obstacles, dp_st_graph output default speed profile.";
     std::vector<SpeedPoint> speed_profile;
     float s = 0.0;
     float t = 0.0;
+	// 这里其实只是将时间t[0,7],以及s[0,7]范围的点赋值。(0,0),(1,1),(2,2),(3,3),(4,4),(5,5),(6,6),(7,7)
     for (int i = 0; i < dp_st_speed_config_.matrix_dimension_t() &&
                     i < dp_st_speed_config_.matrix_dimension_s();
          ++i, t += unit_t_, s += unit_s_) {
       SpeedPoint speed_point;
       speed_point.set_s(s);
       speed_point.set_t(t);
-      const float v_default = unit_s_ / unit_t_;
+      const float v_default = unit_s_ / unit_t_;// 默认速度,这里计算出来是1
       speed_point.set_v(v_default);
-      speed_point.set_a(0.0);
+      speed_point.set_a(0.0);// 加速度为0
       speed_profile.emplace_back(std::move(speed_point));
     }
+    // std::move是将左值(或左值引用)转换到右值(右值引用)。将对象的状态或者所有权从一个对象转移到另一个对象,
+    // 只是转移，没有内存的搬迁或者内存拷贝。比如这里,是将speed_profile的内存的所有权转移到speed_data。
     speed_data->set_speed_vector(std::move(speed_profile));
     return Status::OK();
   }
 
+ // 构建一个cost_table_表格,表格的行数是时间t,列数是累计距离s。也就是说,这里表格是8行150列。表格的每个格子中的元素是StGraphPoint
   if (!InitCostTable().ok()) {
     const std::string msg = "Initialize cost table failed.";
     AERROR << msg;
@@ -158,11 +165,13 @@ Status DpStGraph::InitCostTable() {
       dim_t, std::vector<StGraphPoint>(dim_s, StGraphPoint()));
 
   float curr_t = 0.0;
+  // 这里给cost_table_中每个元素的s和t赋值
   // 遍历每一行
   for (uint32_t i = 0; i < cost_table_.size(); ++i, curr_t += unit_t_) {
+  	// 取出cost_table_的第一行,这一行的时间t是相同的,
     auto& cost_table_i = cost_table_[i];
     float curr_s = 0.0;
-    // 遍历每一列 赋值每一个矩阵元素的 s,t
+    // 遍历取出的那一行的每一列 赋值每一个矩阵元素的 s,t
     for (uint32_t j = 0; j < cost_table_i.size(); ++j, curr_s += unit_s_) {
       cost_table_i[j].Init(i, j, STPoint(curr_s, curr_t));
     }
