@@ -46,11 +46,14 @@ constexpr float kInf = std::numeric_limits<float>::infinity();
 
 bool CheckOverlapOnDpStGraph(const std::vector<const StBoundary*>& boundaries,
                              const StGraphPoint& p1, const StGraphPoint& p2) {
+  // 以p1和p2构建一条线段
   const common::math::LineSegment2d seg(p1.point(), p2.point());
+  // 遍历所有的障碍物boundary
   for (const auto* boundary : boundaries) {
     if (boundary->boundary_type() == StBoundary::BoundaryType::KEEP_CLEAR) {
       continue;
     }
+	// 如果有某个boundary和起始点构造的线段有重叠,说明从起点直接到终点(1s的时间)会撞上障碍物
     if (boundary->HasOverlap(seg)) {
       return true;
     }
@@ -155,8 +158,8 @@ Status DpStGraph::Search(SpeedData* const speed_data) {
 }
 
 Status DpStGraph::InitCostTable() {
-  uint32_t dim_s = dp_st_speed_config_.matrix_dimension_s();
-  uint32_t dim_t = dp_st_speed_config_.matrix_dimension_t();
+  uint32_t dim_s = dp_st_speed_config_.matrix_dimension_s();  //150
+  uint32_t dim_t = dp_st_speed_config_.matrix_dimension_t();  //8
   DCHECK_GT(dim_s, 2);
   DCHECK_GT(dim_t, 2);
   // cost_table_是一个以vector形式存储的矩阵,其中同一行表示的是在相同的t下的不同s,这个矩阵8行150列,这里使用
@@ -183,10 +186,10 @@ Status DpStGraph::InitCostTable() {
 Status DpStGraph::CalculateTotalCost() {
   // col and row are for STGraph
   // t corresponding to col
-  // s corresponding to row
+  // s corresponding to row // 这里这个注释对应的是st图的行和列,不是cost_table_,二者正好是个转置
   uint32_t next_highest_row = 0;
   uint32_t next_lowest_row = 0;
-  // 遍历 cost_table_ 的每一行
+  // 遍历 cost_table_ 的每一行即是遍历每一个t
   for (size_t c = 0; c < cost_table_.size(); ++c) {
     int highest_row = 0;
     int lowest_row = cost_table_.back().size() - 1;
@@ -196,7 +199,7 @@ Status DpStGraph::CalculateTotalCost() {
         PlanningThreadPool::instance()->Push(
             std::bind(&DpStGraph::CalculateCostAt, this, c, r));
       } else {
-	  	// 计算在第c行,第r列的元素的cost
+	  	// 计算在第c行(对应时间t),第r列(对应累计距离s)的元素的障碍物cost
         CalculateCostAt(c, r);
       }
     }
@@ -255,6 +258,7 @@ void DpStGraph::GetRowRange(const StGraphPoint& point, int* next_highest_row,
 }
 
 void DpStGraph::CalculateCostAt(const uint32_t c, const uint32_t r) {
+  // 注意:cost_table_中存储的是从[c=0,r=0]到当前[c,r]的总cost
   auto& cost_cr = cost_table_[c][r];
   // 计算得到cost_table_[c][r] 的 障碍物cost,在计算是需要考虑cost_cr对应时刻的所有障碍物
   cost_cr.SetObstacleCost(dp_st_cost_.GetObstacleCost(cost_cr)); 
@@ -264,56 +268,75 @@ void DpStGraph::CalculateCostAt(const uint32_t c, const uint32_t r) {
   }
 
   const auto& cost_init = cost_table_[0][0];
+  // 如果是第0列,也就是cost_table中时间t = 0 的那一列,
   if (c == 0) {
     DCHECK_EQ(r, 0) << "Incorrect. Row should be 0 with col = 0. row: " << r;
     cost_cr.SetTotalCost(0.0);
     return;
   }
-
+  
+  // 获取在unit_s_ * r处的速度限制,unit_s_ = 1
   float speed_limit =
       st_graph_data_.speed_limit().GetSpeedLimitByS(unit_s_ * r);
+
+  // 如果是第1行,也就是t = 1的 那一行
   if (c == 1) {
+  	// 求取第1行,第r列,也就是t = 1, s = r*unit_s_处的加速度,这里的加速速度是指从第0时刻的s=0位置直接到达函数输入中[c=1,r]对应
+  	// 的位置时的加速度
     const float acc = (r * unit_s_ / unit_t_ - init_point_.v()) / unit_t_;
+	// 如果加速度超出阈值,说明从[c=0,r=0]直接到达(1s的时间)这个点[c=1,r]是不可能的,直接返回这个时候的总cost只包含了障碍物cost
     if (acc < dp_st_speed_config_.max_deceleration() ||
         acc > dp_st_speed_config_.max_acceleration()) {
       return;
     }
-
+    // 如果没有超出阈值,就要计算从[c=0,r=0]直接到达(1s的时间)这个点[c=1,r]cost_cr,在加速度上是可行的,但是要判断直接到达的话会不会
+    // 撞上障碍物。如果会装上障碍物直接返回,这个时候的总cost只包含了障碍物cost
     if (CheckOverlapOnDpStGraph(st_graph_data_.st_boundaries(), cost_cr,
                                 cost_init)) {
       return;
     }
+	// 如果撞不上,那么[c=1,r]总的cost就是其障碍物cost + 初始点[c=0,r=0]的总cost + r对应s处的speed_cost,acc_cost,jerk_cost
     cost_cr.SetTotalCost(cost_cr.obstacle_cost() + cost_init.total_cost() +
                          CalculateEdgeCostForSecondCol(r, speed_limit));
+	// 并且,[c=1,r]的上一个点就是初始点[0,0],说明可以直接从[0,0]直接在1s时间内到达[c=1,r]点,而不必逐个格子去走
     cost_cr.SetPrePoint(cost_init);
     return;
   }
 
   constexpr float kSpeedRangeBuffer = 0.20;
+  // 这里计算的是在一个单位时间unit_t_=1s内最多能够走的距离包含多少个单位距离unit_s_
   const uint32_t max_s_diff =
       static_cast<uint32_t>(FLAGS_planning_upper_speed_limit *
                             (1 + kSpeedRangeBuffer) * unit_t_ / unit_s_);
+  // 如果max_s_diff < r,那么说明在一个单位时间unit_t_=1s内,不可能从[c,r=0]直接到到达r对应的s,要想到达r对应的s至少得以r-max_s_diff
+  // 作为起点才可以。如果max_s_diff > r,那么说明在一个单位时间unit_t_=1s内,能够从[c,r=0]直接到到达r对应的s
+  // 所以这里求得的是在一个单位时间unit_t_=1s内,能够到达当前的s的那个最远的s所对应的r(r_low)
   const uint32_t r_low = (max_s_diff < r ? r - max_s_diff : 0);
 
+  // 取出上一个时间([c-1]对应的时刻)的那一列赋给pre_col,注意pre_col中的每一个元素[c-1,r]的cost都已经计算好了
   const auto& pre_col = cost_table_[c - 1];
-
+  
+  // c = 2, 对应于t = 2那一列
   if (c == 2) {
+  	// 从最远的能够到达当前r的那一层开始遍历,一直遍历到当前r-1对应的s
     for (uint32_t r_pre = r_low; r_pre <= r; ++r_pre) {
       const float acc =
-          (r * unit_s_ - 2 * r_pre * unit_s_) / (unit_t_ * unit_t_);
+          (r * unit_s_ - 2 * r_pre * unit_s_) / (unit_t_ * unit_t_);// 这个地方为什么要乘个2
+	  // 如果计算出的加速度不在阈值范围之内,那么就考虑下一个s(r_pre)
       if (acc < dp_st_speed_config_.max_deceleration() ||
           acc > dp_st_speed_config_.max_acceleration()) {
         continue;
       }
-
+      // 如果加速度在阈值范围内,就考虑从上一列中的r_pre这个点直接连接到当前这个点[c=2,r_pre]会不会和障碍物相撞
+      // 如果相撞就考虑下一个s(r_pre)
       if (CheckOverlapOnDpStGraph(st_graph_data_.st_boundaries(), cost_cr,
                                   pre_col[r_pre])) {
         continue;
       }
-
+      // 如果不相撞,cost = 当前点cost_cr[c,r]的障碍物cost + 上一时刻与cost_cr直连的点的总cost + 对应的speed_cost,acc_cost,jerk_cost
       const float cost = cost_cr.obstacle_cost() + pre_col[r_pre].total_cost() +
                          CalculateEdgeCostForThirdCol(r, r_pre, speed_limit);
-
+      // 上面的处理是对于某个特定的s(和r_pre对应)来进行的,下面这个if就是为了在这些s中找到cost最小的那一个
       if (cost < cost_cr.total_cost()) {
         cost_cr.SetTotalCost(cost);
         cost_cr.SetPrePoint(pre_col[r_pre]);

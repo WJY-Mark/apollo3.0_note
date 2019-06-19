@@ -37,14 +37,19 @@ DpStCost::DpStCost(const DpStSpeedConfig& config,
                    const common::TrajectoryPoint& init_point)
     : config_(config), obstacles_(obstacles), init_point_(init_point) {
   int index = 0;
+  // 这里完成对boundary_map_这个集合的赋值。在boundary_map_中可以按照障碍物boundary的id()来搜索其对应的障碍物在obstacles
+  // 中对应的序号
   for (auto& obstacle : obstacles) {
     boundary_map_[obstacle->st_boundary().id()] = index++;
   }
+  
   unit_t_ = config_.total_time() / config_.matrix_dimension_t();
 
   AddToKeepClearRange(obstacles);
   // boundary_cost_ 是一个矩阵,每一行仍然是一个vector,每一行的元素是一个pair,这里全部初始化为(-1.0,-1.0)
-  // 这个矩阵的一行代表一个障碍物,每一行中的每一个元素代表的是在时刻t的(s_upper, s_lower),每一行时间间隔是1,一行有8个元素
+  // 这个矩阵的一行代表一个障碍物,每一行中的每一个元素代表的是在时刻t的(s_upper, s_lower),每一行时间间隔是1,
+  // 一行有8个元素,并且这个矩阵中行的排列顺序与obstacles向量中障碍物的排列顺序是一致的,也就是说这个矩阵的第一行
+  // 对应于obstacles中的第一个障碍物
   boundary_cost_.resize(obstacles_.size());
   for (auto& vec : boundary_cost_) {
     vec.resize(config_.matrix_dimension_t(), std::make_pair(-1.0, -1.0));
@@ -109,7 +114,7 @@ float DpStCost::GetObstacleCost(const StGraphPoint& st_graph_point) {
   const float t = st_graph_point.point().t();
 
   float cost = 0.0;
-  // 遍历每一个障碍物
+  // 遍历每一个障碍物,考虑所有障碍物在st_graph_point点的cost
   for (const auto* obstacle : obstacles_) {
   	// 如果不是阻挡障碍物就不用管它
     if (!obstacle->IsBlockingObstacle()) {
@@ -127,7 +132,7 @@ float DpStCost::GetObstacleCost(const StGraphPoint& st_graph_point) {
     if (t < boundary.min_t() || t > boundary.max_t()) {
       continue;
     }
-	// 如果这个障碍物时阻挡障碍物,并且(s,t)这个元素在boundary内部,那么,(s,t)肯定和boundary相撞,于是就返回最大值kInf,表示
+	// 如果这个障碍物是阻挡障碍物,并且(s,t)这个元素在boundary内部,那么(s,t)肯定和boundary相撞,于是就返回最大值kInf,表示
 	// (s,t)这个元素的cost无穷大
     if (obstacle->IsBlockingObstacle() &&
         boundary.IsPointInBoundary(STPoint(s, t))) {
@@ -137,7 +142,10 @@ float DpStCost::GetObstacleCost(const StGraphPoint& st_graph_point) {
     double s_lower = 0.0;
     // 获取boundary.id()的index标号
     int boundary_index = boundary_map_[boundary.id()];
-	// 条件满足,说明boundary_index对应的那个boundary(也就是障碍物)在index_t()时刻的boundary还没有赋值,所以这里要给它赋值
+	
+	// boundary_cost_矩阵中的元素的初值都是(-1.0,-1.0)
+	// 判断第boundary_index(于obstacles中障碍物的序号一致)个障碍物在index_t()时刻的元素(也就是s_upper,s_lower)是否已经赋值
+	// 其实也就是判断一下第boundary_index个障碍物对应的标定框在第t时刻的上下界是否存储到了boundary_cost_矩阵中
     if (boundary_cost_[boundary_index][st_graph_point.index_t()].first < 0.0) {
       boundary.GetBoundarySRange(t, &s_upper, &s_lower);
       boundary_cost_[boundary_index][st_graph_point.index_t()] =
@@ -150,7 +158,7 @@ float DpStCost::GetObstacleCost(const StGraphPoint& st_graph_point) {
     if (s < s_lower) {
       constexpr float kSafeTimeBuffer = 3.0;
       const float len = obstacle->obstacle()->Speed() * kSafeTimeBuffer;  // 计算安全距离
-      if (s + len < s_lower) { // 条件满足不会装上
+      if (s + len < s_lower) { // 条件满足不会撞上,就去进入下一次循环研究下一个障碍物
         continue;
       } // 会撞的情况下计算这个(s,t)元素的cost
 	  else {
@@ -167,8 +175,9 @@ float DpStCost::GetObstacleCost(const StGraphPoint& st_graph_point) {
         cost += config_.obstacle_weight() * config_.default_obstacle_cost() *
                 std::pow((kSafeDistance + s_upper - s), 2);
       }
-    }// 到这里就能求出当前障碍物在t时刻的cost
+    }// 到这里就能求出当前障碍物在t时刻s位置时的障碍物cost
   }
+  // 到这里就能求出所有障碍物在t时刻s位置时的障碍物cost
   return cost * unit_t_;
 }
 

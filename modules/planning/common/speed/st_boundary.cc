@@ -291,13 +291,15 @@ bool StBoundary::GetUnblockSRange(const double curr_time, double* s_upper,
 
   size_t left = 0;
   size_t right = 0;
+  // 获得时刻t的左边的时刻left和右边的时刻right
   if (!GetIndexRange(lower_points_, curr_time, &left, &right)) {
     AERROR << "Fail to get index range.";
     return false;
   }
+  // 求取比例
   const double r = (curr_time - upper_points_[left].t()) /
                    (upper_points_.at(right).t() - upper_points_.at(left).t());
-
+  // 按照比例计算curr时间t对应的上下界upper_cross_s,lower_cross_s
   double upper_cross_s =
       upper_points_[left].s() +
       r * (upper_points_[right].s() - upper_points_[left].s());
@@ -308,7 +310,7 @@ bool StBoundary::GetUnblockSRange(const double curr_time, double* s_upper,
   if (boundary_type_ == BoundaryType::STOP ||
       boundary_type_ == BoundaryType::YIELD ||
       boundary_type_ == BoundaryType::FOLLOW) {
-    *s_upper = lower_cross_s;
+    *s_upper = lower_cross_s; // 对应这个三种形式的boundary,其对应的障碍物一定位于车辆的前方,所以这里只关注lower_cross_s
   } else if (boundary_type_ == BoundaryType::OVERTAKE) {
     *s_lower = std::fmax(*s_lower, upper_cross_s);
   } else {
@@ -364,12 +366,13 @@ bool StBoundary::GetIndexRange(const std::vector<STPoint>& points,
   }
   // 匿名函数,如果p点对应的时间小于时间t,返回true
   auto comp = [](const STPoint& p, const double t) { return p.t() < t; };
-  // 得到在point中第一个满足comp匿名函数的点的位置
+  // 得到在point中最后一个满足comp匿名函数的点的迭代器first_ge
   auto first_ge = std::lower_bound(points.begin(), points.end(), t, comp);
+  // 求取这个点的序号(其实就是右边界)
   size_t index = std::distance(points.begin(), first_ge);
   if (index == 0) {
     *left = *right = 0;
-  } else if (first_ge == points.end()) {
+  } else if (first_ge == points.end()) { // 这一步处理应该是有问题
     *left = *right = points.size() - 1;
   } else {
     *left = index - 1;
