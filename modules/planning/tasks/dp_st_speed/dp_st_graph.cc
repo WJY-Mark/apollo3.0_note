@@ -189,11 +189,12 @@ Status DpStGraph::CalculateTotalCost() {
   // s corresponding to row // 这里这个注释对应的是st图的行和列,不是cost_table_,二者正好是个转置
   uint32_t next_highest_row = 0;
   uint32_t next_lowest_row = 0;
-  // 遍历 cost_table_ 的每一行即是遍历每一个t
+  // 遍历每一个t
   for (size_t c = 0; c < cost_table_.size(); ++c) {
     int highest_row = 0;
     int lowest_row = cost_table_.back().size() - 1;
     // 遍历cost_table_ 的每一列
+    // 第一次进这个循环的时候next_highest_row = 0,next_lowest_row = 0,保证能够计算第0列,也就是t = 0的那一列
     for (uint32_t r = next_lowest_row; r <= next_highest_row; ++r) {
       if (FLAGS_enable_multi_thread_in_dp_st_graph) {
         PlanningThreadPool::instance()->Push(
@@ -203,11 +204,13 @@ Status DpStGraph::CalculateTotalCost() {
         CalculateCostAt(c, r);
       }
     }
-	// 到此处,计算完成第c行的每一个元素的cost
+	// 到此处,计算完成第c列的每一个元素的cost,也就是相同时刻t,不同s的总cost
     if (FLAGS_enable_multi_thread_in_dp_st_graph) {
       PlanningThreadPool::instance()->Synchronize();
     }
-
+    // 这部分计算的next_highest_row和next_lowest_row作用就是为了减少计算量。例如当前节点是(t,s)，那么根据当前最大规划速度v
+    // 就可以计算unit_t时刻以后，无人车的累积距离最大为s+3，那么就可以简单地将下一层计算限制在[t+1,s]到[t+1,s+3]内。而不用
+    // 计算t+1行所有节点和当前节点的连接，因为部分节点和当前节点过远，在unit_t以后根本到不了，所以不需要计算。
     for (uint32_t r = next_lowest_row; r <= next_highest_row; ++r) {
       const auto& cost_cr = cost_table_[c][r];
       if (cost_cr.total_cost() < std::numeric_limits<float>::infinity()) {
@@ -321,7 +324,9 @@ void DpStGraph::CalculateCostAt(const uint32_t c, const uint32_t r) {
   	// 从最远的能够到达当前r的那一层开始遍历,一直遍历到当前r-1对应的s
     for (uint32_t r_pre = r_low; r_pre <= r; ++r_pre) {
       const float acc =
-          (r * unit_s_ - 2 * r_pre * unit_s_) / (unit_t_ * unit_t_);// 这个地方为什么要乘个2
+          (r * unit_s_ - 2 * r_pre * unit_s_) / (unit_t_ * unit_t_);
+	  // 这个地方为什么要乘个2这是因为平均加速度 = {(s2-s1)/t - (s1-s0)/t}/t,且s0 = 0
+	  
 	  // 如果计算出的加速度不在阈值范围之内,那么就考虑下一个s(r_pre)
       if (acc < dp_st_speed_config_.max_deceleration() ||
           acc > dp_st_speed_config_.max_acceleration()) {
@@ -345,6 +350,8 @@ void DpStGraph::CalculateCostAt(const uint32_t c, const uint32_t r) {
     return;
   }
   for (uint32_t r_pre = r_low; r_pre <= r; ++r_pre) {
+  	// 如果上一列(时间域)中对应的r_pre位置的cost为无穷大,那么说明,速度曲线根本就可能经过那个点,所以就不考虑了
+  	// 如果上一列(时间域)中对应的r_pre位置的点没有与之相连的前向点pre_point(),说明速度曲线根本就可能经过那个点,所以就不考虑了
     if (std::isinf(pre_col[r_pre].total_cost()) ||
         pre_col[r_pre].pre_point() == nullptr) {
       continue;
@@ -353,25 +360,30 @@ void DpStGraph::CalculateCostAt(const uint32_t c, const uint32_t r) {
     const float curr_a = (cost_cr.index_s() * unit_s_ +
                           pre_col[r_pre].pre_point()->index_s() * unit_s_ -
                           2 * pre_col[r_pre].index_s() * unit_s_) /
-                         (unit_t_ * unit_t_);
+                         (unit_t_ * unit_t_); // 平均加速度 = {(s2-s1)/t - (s1-s0)/t}/t
+    // 如果加速度超出阈值范围,那么这个r_pre对应的s不再考虑,考虑下一个
     if (curr_a > vehicle_param_.max_acceleration() ||
         curr_a < vehicle_param_.max_deceleration()) {
       continue;
     }
+	// 如果加速度在阈值范围之内,考虑从上一列(上一个时刻t)对应的r_pre出直连[c,r]点的线是否与障碍物的boundary有重叠
+	// 如果有重叠,那么这个r_pre对应的s不再考虑,考虑下一个
     if (CheckOverlapOnDpStGraph(st_graph_data_.st_boundaries(), cost_cr,
                                 pre_col[r_pre])) {
       continue;
     }
-
+    // 如果没有重叠,就考察上上个点pre_col[r_pre].pre_point()的总cost
     uint32_t r_prepre = pre_col[r_pre].pre_point()->index_s();
     const StGraphPoint& prepre_graph_point = cost_table_[c - 2][r_prepre];
+	// 如果上上个点的总cost为无穷大,那么这个r_pre对应的s不再考虑,考虑下一个
     if (std::isinf(prepre_graph_point.total_cost())) {
       continue;
     }
-
+    // 如果上上个点没有pre_point(),那么这个r_pre对应的s不再考虑,考虑下一个
     if (!prepre_graph_point.pre_point()) {
       continue;
     }
+	// 如果上上个点有pre_point(),那就取出上上上个点,上上个点,上个点,当前点来计算cost(这里的上指的是时间域)
     const STPoint& triple_pre_point = prepre_graph_point.pre_point()->point();
     const STPoint& prepre_point = prepre_graph_point.point();
     const STPoint& pre_point = pre_col[r_pre].point();
@@ -390,6 +402,8 @@ void DpStGraph::CalculateCostAt(const uint32_t c, const uint32_t r) {
 Status DpStGraph::RetrieveSpeedProfile(SpeedData* const speed_data) {
   float min_cost = std::numeric_limits<float>::infinity();
   const StGraphPoint* best_end_point = nullptr;
+  // 遍历cost_table_中的最后一行,其实就是在t=7那一行中找出cost最小的那个点赋值给best_end_point,这个点能够保证时间是从0-7s,但是
+  // 最终距离不一定是s = 149.
   for (const StGraphPoint& cur_point : cost_table_.back()) {
     if (!std::isinf(cur_point.total_cost()) &&
         cur_point.total_cost() < min_cost) {
@@ -397,7 +411,10 @@ Status DpStGraph::RetrieveSpeedProfile(SpeedData* const speed_data) {
       min_cost = cur_point.total_cost();
     }
   }
-
+  // 遍历cost_table_ 的每一行,取出每一行的最后一个元素,这个元素的s一定是149,然后从这里面找出cost最小的赋值给best_end_point,这个点
+  // 一定能够到达s=149,但是不一定要花8秒的时间
+  ////需要注意的是,最终选定的终点是这两种方式中cost最小的那一种,也就是说,最后选定的这个终点,可能是能够保证s但不保证t的,也可能是能
+  ////够保证t但是不能够保证s的。
   for (const auto& row : cost_table_) {
     const StGraphPoint& cur_point = row.back();
     if (!std::isinf(cur_point.total_cost()) &&
@@ -415,6 +432,7 @@ Status DpStGraph::RetrieveSpeedProfile(SpeedData* const speed_data) {
 
   std::vector<SpeedPoint> speed_profile;
   const StGraphPoint* cur_point = best_end_point;
+  // 向前回溯得到速度点
   while (cur_point != nullptr) {
     SpeedPoint speed_point;
     speed_point.set_s(cur_point->point().s());
@@ -422,6 +440,7 @@ Status DpStGraph::RetrieveSpeedProfile(SpeedData* const speed_data) {
     speed_profile.emplace_back(speed_point);
     cur_point = cur_point->pre_point();
   }
+  // 由于回溯时,最后一个速度点在列表的头部,所以这里要将速度曲线列表反转
   std::reverse(speed_profile.begin(), speed_profile.end());
 
   constexpr float kEpsilon = std::numeric_limits<float>::epsilon();
