@@ -36,11 +36,12 @@
 namespace apollo {
 namespace planning {
 
+// 传入从配置文件中读取的配置信息,并获取一个样条曲线求解器
 QpSplineReferenceLineSmoother::QpSplineReferenceLineSmoother(
     const ReferenceLineSmootherConfig& config)
     : ReferenceLineSmoother(config) {
   spline_solver_.reset(
-      new Spline2dSolver(t_knots_, config.qp_spline().spline_order()));
+      new Spline2dSolver(t_knots_, config.qp_spline().spline_order())); // spline_order() = 5
 }
 
 void QpSplineReferenceLineSmoother::Clear() { t_knots_.clear(); }
