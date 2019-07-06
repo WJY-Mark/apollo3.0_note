@@ -65,13 +65,16 @@ ReferenceLineProvider::ReferenceLineProvider(const hdmap::HDMap *base_map) {
   if (!FLAGS_use_navigation_mode) {
     pnc_map_.reset(new hdmap::PncMap(base_map));
   }
+  // 读取平滑器配置文件
   CHECK(common::util::GetProtoFromFile(FLAGS_smoother_config_filename,
                                        &smoother_config_))
       << "Failed to load smoother config file "
       << FLAGS_smoother_config_filename;
+  // qp二次规划平滑器配置
   if (smoother_config_.has_qp_spline()) {
     smoother_.reset(new QpSplineReferenceLineSmoother(smoother_config_));
-  } else if (smoother_config_.has_spiral()) {
+  } // 螺旋线平滑器配置
+  else if (smoother_config_.has_spiral()) {
     smoother_.reset(new SpiralReferenceLineSmoother(smoother_config_));
   } else {
     CHECK(false) << "unknown smoother config "
@@ -105,11 +108,13 @@ bool ReferenceLineProvider::Start() {
   // 如果采用navigation_mode模式，直接返回true，不会启动reference_line_provider线程
   if (FLAGS_use_navigation_mode) {
     return true;
-  }
+  } // 在构造reference_line_provider_对象时完成初始化
   if (!is_initialized_) {
     AERROR << "ReferenceLineProvider has NOT been initiated.";
     return false;
   }
+
+  // reference_line_provider_线程开启
   if (FLAGS_enable_reference_line_provider_thread) {
     thread_.reset(
         new std::thread(&ReferenceLineProvider::GenerateThread, this));
@@ -544,25 +549,25 @@ bool ReferenceLineProvider::CreateRouteSegments(
 }
 
 double ReferenceLineProvider::LookForwardDistance(const VehicleState &state) {
-  auto forward_distance = state.linear_velocity() * FLAGS_look_forward_time_sec;
+  auto forward_distance = state.linear_velocity() * FLAGS_look_forward_time_sec;// 8s
 
-  if (forward_distance > FLAGS_look_forward_short_distance) {
-    return FLAGS_look_forward_long_distance;
+  if (forward_distance > FLAGS_look_forward_short_distance) { // 150m
+    return FLAGS_look_forward_long_distance; // 250m, 也就是说当车辆的速度很快时,就是250m
   }
 
   return FLAGS_look_forward_short_distance;
 }
 
 bool ReferenceLineProvider::CreateReferenceLine(
-    std::list<ReferenceLine> *reference_lines,
-    std::list<hdmap::RouteSegments> *segments) {
+    std::list<ReferenceLine> *reference_lines,      // 参考线列表
+    std::list<hdmap::RouteSegments> *segments) {    // 路段列表
   CHECK_NOTNULL(reference_lines);
   CHECK_NOTNULL(segments);
 
   common::VehicleState vehicle_state;
   {
-    std::lock_guard<std::mutex> lock(vehicle_state_mutex_);
-    vehicle_state = vehicle_state_;
+    std::lock_guard<std::mutex> lock(vehicle_state_mutex_); // std::lock_guard<std::mutex>作用范围在{}内
+    vehicle_state = vehicle_state_;// 上面的锁保证这里的赋值在每个线程中时顺序访问的
   }
 
   routing::RoutingResponse routing;
@@ -582,8 +587,8 @@ bool ReferenceLineProvider::CreateReferenceLine(
     }
   }
 
-  double look_forward_distance = LookForwardDistance(vehicle_state);
-  double look_backward_distance = FLAGS_look_backward_distance;
+  double look_forward_distance = LookForwardDistance(vehicle_state);  // 150m or 250m
+  double look_backward_distance = FLAGS_look_backward_distance;       // 30m
   if (!CreateRouteSegments(vehicle_state, look_backward_distance,
                            look_forward_distance, segments)) {
     AERROR << "Failed to create reference line from routing";
