@@ -402,6 +402,7 @@ void DpStGraph::CalculateCostAt(const uint32_t c, const uint32_t r) {
 Status DpStGraph::RetrieveSpeedProfile(SpeedData* const speed_data) {
   float min_cost = std::numeric_limits<float>::infinity();
   const StGraphPoint* best_end_point = nullptr;
+  // cost_table中
   // 遍历cost_table_中的最后一行,其实就是在t=7那一行中找出cost最小的那个点赋值给best_end_point,这个点能够保证时间是从0-7s,但是
   // 最终距离不一定是s = 149.
   for (const StGraphPoint& cur_point : cost_table_.back()) {
