@@ -133,13 +133,13 @@ ComparableCost TrajectoryCost::CalculatePathCost(
 
   const auto &vehicle_config =
       common::VehicleConfigHelper::instance()->GetConfig();
-  const float width = vehicle_config.vehicle_param().width();
-   // path_resolution: 1.0m，在两个点拟合的曲线上每1m采样一个点，每采一个点计算改点的path_cost
+  const float width = vehicle_config.vehicle_param().width();// 车辆宽度
+   // path_resolution: 1.0m，在两个点拟合的曲线上每1m采样一个点，每采一个点计算改点的path_cost，包括其l,dl,ddl三个方面
   for (float curve_s = 0.0; curve_s < (end_s - start_s);curve_s += config_.path_resolution()) {
       // 计算累计距离为curve_s处的横向偏移l
 	const float l = curve.Evaluate(0, curve_s);
       // 横向偏移距离l的开销，path_l_cost：6.5
-      // quasi_softmax(std::fabs(l))这个的作用要好好研究一下
+      // quasi_softmax(std::fabs(l))这个的作用随着fabs(l)的增大,quasi_softmax的取值越小,也就是说当横向偏差越大,其所起的作用越小
     path_cost += l * l * config_.path_l_cost() * quasi_softmax(std::fabs(l));
 
     double left_width = 0.0;
@@ -153,10 +153,10 @@ ComparableCost TrajectoryCost::CalculatePathCost(
                                   l - width / 2.0 - kBuff < -right_width)) {
       cost.cost_items[ComparableCost::OUT_OF_BOUNDARY] = true;
     }
-     // 横向速度dl的cost
+     // 横向速度dl的cost,path_dl_cost = 8000
     const float dl = std::fabs(curve.Evaluate(1, curve_s));
     path_cost += dl * dl * config_.path_dl_cost();
-    // 横向加速度ddl的cost
+    // 横向加速度ddl的cost,path_ddl_cost = 50
     const float ddl = std::fabs(curve.Evaluate(2, curve_s));
     path_cost += ddl * ddl * config_.path_ddl_cost();
   }
@@ -169,7 +169,7 @@ ComparableCost TrajectoryCost::CalculatePathCost(
   	// 计算拟合曲线最后一个点处的横向偏移l
     const float end_l = curve.Evaluate(0, end_s - start_s);
     path_cost +=
-        std::sqrt(end_l - init_sl_point_.l() / 2.0) * config_.path_end_l_cost();
+        std::sqrt(end_l - init_sl_point_.l() / 2.0) * config_.path_end_l_cost(); // path_end_l_cost = 10000
   }
   cost.smoothness_cost = path_cost;
   return cost;
@@ -183,7 +183,7 @@ ComparableCost TrajectoryCost::CalculateStaticObstacleCost(
   ComparableCost obstacle_cost;
   // 在拟合的曲线上每隔1m取一个点
   for (float curr_s = start_s; curr_s <= end_s;curr_s += config_.path_resolution()) {
-      // 计算累计距离为curve_s处的横向偏移curr_l
+      // 计算拟合曲线上累计距离为curve_s处的横向偏移curr_l
 	const float curr_l = curve.Evaluate(0, curr_s - start_s);
 	  // 遍历每一个障碍物,计算总的静态障碍物cost
     for (const auto &obs_sl_boundary : static_obstacle_sl_boundaries_) {
@@ -194,7 +194,7 @@ ComparableCost TrajectoryCost::CalculateStaticObstacleCost(
   return obstacle_cost;
 }
 
-//计算动态障碍物的cost。在进入到这个函数之前,我们已经对障碍物进行时间段运动采样，得到了障碍物每隔0.1s的坐标位置,
+//计算动态障碍物的cost。在进入到这个函数之前,我们已经对障碍物进行时间域的运动预测采样，得到了障碍物每隔0.1s的坐标位置,
 // 那么只要需要计算拟合曲线curve每个采样点和障碍物运动的坐标位置cost，求和就可以每个动态障碍物的cost。由于障碍物运动
 // 坐标是每隔0.1s的时间进行采样的,所以这里curve采样和静态障碍物cost计算按照1m的距离间隔采样不同，这里curve也采用每隔0.1s
 // 的时间采样,这样才能计算每一个时刻障碍物运动坐标点与curves上的点的相对位置关系,并且在curve上采样的次数和动态障碍物位置坐标
@@ -219,7 +219,7 @@ ComparableCost TrajectoryCost::CalculateDynamicObstacleCost(
     if (ref_s < start_s) {
       continue;
     }
-	// ref_s < start_s说明在当前time_stamp处，车辆已经走过了拟合曲线curve的终点,那么在这个time_stamp之后,这段拟合曲线与障碍物的
+	// ref_s > start_s说明在当前time_stamp处，车辆已经走过了拟合曲线curve的终点,那么在这个time_stamp之后,这段拟合曲线与障碍物的
 	// 位置关系就不需要再考虑了,因为肯定撞不了
     if (ref_s > end_s) {
       break;
@@ -228,16 +228,18 @@ ComparableCost TrajectoryCost::CalculateDynamicObstacleCost(
     // 时刻可能到达的点)与障碍物的位置关系
     const float s = ref_s - start_s;  // s on spline curve 相对于拟合曲线curve的start_s的s
     const float l = curve.Evaluate(0, s);
-    const float dl = curve.Evaluate(1, s);
+    const float dl = curve.Evaluate(1, s); // s,l,dl这三个值就是在拟合曲线curve上的采样点
 
     const common::SLPoint sl = common::util::MakeSLPoint(ref_s, l);
     const Box2d ego_box = GetBoxFromSLPoint(sl, dl);// 当前时刻,车辆的box
-    // 计算当前time_stamp时刻动态障碍物cost
-    for (const auto &obstacle_trajectory : dynamic_obstacle_boxes_) {
+    // 计算当前time_stamp时刻curve上采样点(ego_box的位置)与所有动态障碍物cost
+    for (const auto &obstacle_trajectory : dynamic_obstacle_boxes_) { // obstacle_trajectory是其中一个动态障碍物的预测轨迹
       obstacle_cost +=
           GetCostBetweenObsBoxes(ego_box, obstacle_trajectory.at(index));
-    }
+    }// 这个循环执行完毕后就会得到当前time_stamp时刻curve上采样点与所有动态障碍物在time_stamp时刻的预测轨迹点的cost。这需要强调,求取
+    // 某个curve采样点的动态障碍物cost,一定考虑的是与之相同时刻的所有障碍物的预测轨迹点的加和。
   }
+  // 这个循环完毕才计算完毕一个curve上所有采样点的动态障碍物cost
   constexpr float kDynamicObsWeight = 1e-6;
   obstacle_cost.safety_cost *=
       (config_.eval_time_interval() * kDynamicObsWeight);
@@ -247,20 +249,21 @@ ComparableCost TrajectoryCost::CalculateDynamicObstacleCost(
 ComparableCost TrajectoryCost::GetCostFromObsSL(
    // 这里计算静态障碍物的基本思想就是:在利用相邻两个level的采样点拟合得到的曲线上进行采样,然后将车辆的box(adc_box)置于
    // 每一个采样点上,然后计算adc_box与每一个静态障碍物的adc_box的相对位置关系,然后根据计算得到的位置关系计算每一个采样点
-   // 的静态障碍物cost
+   // 的静态障碍物cost.计算的时候如果障碍物完全在车辆的左边或者右边或者后边,那么直接返回初始化的obstacle_cost;否则考虑车辆
+   // 后轴中心与障碍物box的中心的横纵向距离,距离越小,代价越大。
     const float adc_s, const float adc_l, const SLBoundary &obs_sl_boundary) {
   const auto &vehicle_param =
       common::VehicleConfigHelper::instance()->GetConfig().vehicle_param();
 
   ComparableCost obstacle_cost;
-
+  // 计算车辆box的四个边界
   const float adc_front_s = adc_s + vehicle_param.front_edge_to_center();
   const float adc_end_s = adc_s - vehicle_param.back_edge_to_center();
   const float adc_left_l = adc_l + vehicle_param.left_edge_to_center();
   const float adc_right_l = adc_l - vehicle_param.right_edge_to_center();
     // 障碍物在车辆的左边或者右边，都不会影响车辆前进，这个障碍物的cost就是默认的obstacle_cost
-  if (adc_left_l + FLAGS_lateral_ignore_buffer < obs_sl_boundary.start_l() ||
-      adc_right_l - FLAGS_lateral_ignore_buffer > obs_sl_boundary.end_l()) {
+  if (adc_left_l + FLAGS_lateral_ignore_buffer < obs_sl_boundary.start_l() || // 车辆完全在障碍物的右边
+      adc_right_l - FLAGS_lateral_ignore_buffer > obs_sl_boundary.end_l()) { // 车辆完全在障碍物的左边
     return obstacle_cost;
   }
   // 车辆的adc_box 与障碍物的box在纵向上或者横向上不重叠,no_overlap为真
@@ -270,6 +273,11 @@ ComparableCost TrajectoryCost::GetCostFromObsSL(
                           obs_sl_boundary.start_l() ||
                       adc_right_l - FLAGS_static_decision_nudge_l_buffer >
                           obs_sl_boundary.end_l()));  // lateral横向上不重叠
+
+
+  //*******end_s*********//
+  //***end_l*****start_l***//
+  //*******start_s*********//
 
  //如果车辆和障碍物在纵向或者横向上重叠
   if (!no_overlap) {
@@ -312,17 +320,17 @@ ComparableCost TrajectoryCost::GetCostBetweenObsBoxes(
   ComparableCost obstacle_cost;
   // 动态障碍物box与车辆ego_box的距离
   const float distance = obstacle_box.DistanceTo(ego_box);
-  //如果distance大于阈值说明障碍物不影响路径生成
-  if (distance > config_.obstacle_ignore_distance()) {
+  //如果distance大于阈值说明障碍物不影响路径生成,返回初始化的obstacle_cost
+  if (distance > config_.obstacle_ignore_distance()) {  // obstacle_ignore_distance = 20.0
     return obstacle_cost;
   }
   // 计算碰撞cost
   obstacle_cost.safety_cost +=  
       config_.obstacle_collision_cost() *
-      Sigmoid(config_.obstacle_collision_distance() - distance);
+      Sigmoid(config_.obstacle_collision_distance() - distance); // obstacle_collision_distance = 0.5m
   // 计算风险cost
   obstacle_cost.safety_cost +=
-      20.0 * Sigmoid(config_.obstacle_risk_distance() - distance);
+      20.0 * Sigmoid(config_.obstacle_risk_distance() - distance); // obstacle_risk_distance = 2.0m
   return obstacle_cost;
 }
 
@@ -347,14 +355,15 @@ ComparableCost TrajectoryCost::Calculate(const QuinticPolynomialCurve1d &curve,
                                          const uint32_t curr_level,
                                          const uint32_t total_level) {
   ComparableCost total_cost;
-  // path cost
+  // path cost 路径代价,以曲线连接的start点和end点的开销,考虑每一个拟合曲线的l,dl，ddl三种因素,最后再考虑采样起点和采样终点的l
   total_cost +=
       CalculatePathCost(curve, start_s, end_s, curr_level, total_level);
 
-  // static obstacle cost
+  // static obstacle cost 静态障碍物代价,主要考虑车辆与障碍物中心的横向距离和纵向距离
   total_cost += CalculateStaticObstacleCost(curve, start_s, end_s);
 
-  // dynamic obstacle cost
+  // dynamic obstacle cost 动态障碍物代价,主要考虑碰撞cost和风险cost(其实还是基于车辆与障碍物的中心距离来计算的),这里的特别之处在于
+  // 拟合曲线curve的采样不在向静态障碍物那样每隔1m采样一次,而是和动态障碍物的轨迹预测统一,每隔0.1s采样一次
   total_cost += CalculateDynamicObstacleCost(curve, start_s, end_s);
   return total_cost;
 }
