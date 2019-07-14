@@ -99,7 +99,7 @@ Status StBoundaryMapper::CreateStBoundary(PathDecision* path_decision) const {
     auto* path_obstacle = path_decision->Find(const_path_obstacle->Id());
 	// 如果障碍物没有纵向决策标签, 那么对该障碍物与期望路径做碰撞分析
     if (!path_obstacle->HasLongitudinalDecision()) {
-	  // 在这个判断条件中,对于某个没有纵向决策标签的障碍物如果能够在st图上成功构建它的的st边界框,返回ok,{}不执行,
+	  // 对于某个没有纵向决策标签的障碍物如果能够在st图上成功构建它的的st边界框,返回ok,{}里面不执行,
       if (!MapWithoutDecision(path_obstacle).ok()) {
         std::string msg = StrCat("Fail to map obstacle ", path_obstacle->Id(),
                                  " without decision.");
@@ -329,17 +329,19 @@ bool StBoundaryMapper::MapStopDecision(
 Status StBoundaryMapper::MapWithoutDecision(PathObstacle* path_obstacle) const {
   std::vector<STPoint> lower_points;
   std::vector<STPoint> upper_points;
-  // 传入的参数:期望路径,路径上的障碍物,障碍物轨迹预测点标定框的上下界。如果成功找出了该障碍物的上下界标定框就返回true
+  // 传入的参数:期望路径点,路径上的障碍物,障碍物轨迹预测点标定框的上下界(是这个函数执行的结果)。如果成功找出了
+  // 该障碍物的上下界标定框就返回true
   if (!GetOverlapBoundaryPoints(path_data_.discretized_path().path_points(),
                                 *(path_obstacle->obstacle()), &upper_points,
                                 &lower_points)) {
     return Status::OK();
   }
-  // 如果这个障碍物的标定框成功找到,就会往下执行
-  // 转成StBoundary，并且打上标签与数据，存入PathObstacle中
+  // 如果这个障碍物的标定框上下界成功找到,就会往下执行
+  // 转成StBoundary，存入PathObstacle中
   auto boundary = StBoundary::GenerateStBoundary(lower_points, upper_points)
                       .ExpandByS(boundary_s_buffer)
                       .ExpandByT(boundary_t_buffer);
+  // boundary的id与障碍物的id是一致的
   boundary.SetId(path_obstacle->Id());
   const auto& prev_st_boundary = path_obstacle->st_boundary();
   const auto& ref_line_st_boundary =
@@ -380,7 +382,7 @@ bool StBoundaryMapper::GetOverlapBoundaryPoints(
             << "] has NO prediction trajectory."
             << obstacle.Perception().ShortDebugString();
     }
-	// 遍历期望路径的每一个路径点
+	// 遍历期望路径的每一个路径点,找到期望路径上第一个与障碍物碰撞的路点,并根据这个路点求取该障碍物的边框上下界
     for (const auto& curr_point_on_path : path_points) {
 	  // 如果当前期望路径点的累计长度s比期望路径的长度还大,说明这个路径点已经超出了当前周期所关注期望路径的范围,
 	  // 就不用再考虑了, 也就是说这个时候本周期的期望路径碰撞分析已经完毕。(在计算期望路径的时候我们可以计算到很
@@ -558,7 +560,8 @@ Status StBoundaryMapper::MapWithDecision(
   }
 
   // 对于纵向决策标签为跟随,并且该障碍物下界点的最后一个点的时间戳小于规划总时间(说明该障碍物的预测轨迹都在本周期规划的期望
-  // 路径范围之内)的障碍物的处理							
+  // 路径范围之内)的障碍物的处理。这么处理的原因是,障碍物预测轨迹的总时长只有5s,而规划时间planning_time_ = 8s,所以有可能出现
+  // 障碍物最后上下界点的时刻是小于8s的,那么这个时候需要将后面一直到8s的障碍物上下界点补齐,才能保证这个障碍物被跟随
   if (decision.has_follow() && lower_points.back().t() < planning_time_) {
     const double diff_s = lower_points.back().s() - lower_points.front().s();
     const double diff_t = lower_points.back().t() - lower_points.front().t();
