@@ -210,7 +210,7 @@ Status DpStGraph::CalculateTotalCost() {
     }
     // 这部分计算的next_highest_row和next_lowest_row作用就是为了减少计算量。例如当前节点是(t,s)，那么根据当前最大规划速度v
     // 就可以计算unit_t时刻以后，无人车的累积距离最大为s+3，那么就可以简单地将下一层计算限制在[t+1,s]到[t+1,s+3]内。而不用
-    // 计算t+1行所有节点和当前节点的连接，因为部分节点和当前节点过远，在unit_t以后根本到不了，所以不需要计算。
+    // 计算t+1行所有节点和当前节点的连接，因为部分节点当前节点过远，在unit_t以后根本到不了，所以不需要计算。
     for (uint32_t r = next_lowest_row; r <= next_highest_row; ++r) {
       const auto& cost_cr = cost_table_[c][r];
       if (cost_cr.total_cost() < std::numeric_limits<float>::infinity()) {
@@ -263,7 +263,7 @@ void DpStGraph::GetRowRange(const StGraphPoint& point, int* next_highest_row,
 void DpStGraph::CalculateCostAt(const uint32_t c, const uint32_t r) {
   // 注意:cost_table_中存储的是从[c=0,r=0]到当前[c,r]的总cost
   auto& cost_cr = cost_table_[c][r];
-  // 计算得到cost_table_[c][r] 的 障碍物cost,在计算是需要考虑cost_cr对应时刻的所有障碍物
+  // 计算得到cost_table_[c][r] 的 障碍物cost,在计算时需要考虑cost_cr对应时刻的所有障碍物
   cost_cr.SetObstacleCost(dp_st_cost_.GetObstacleCost(cost_cr)); 
   // cost无穷大,直接返回(说明cost_cr对应的s直接落在的某个障碍物的boundary内部)
   if (cost_cr.obstacle_cost() > std::numeric_limits<float>::max()) {
@@ -402,6 +402,7 @@ void DpStGraph::CalculateCostAt(const uint32_t c, const uint32_t r) {
 Status DpStGraph::RetrieveSpeedProfile(SpeedData* const speed_data) {
   float min_cost = std::numeric_limits<float>::infinity();
   const StGraphPoint* best_end_point = nullptr;
+  // cost_table中
   // 遍历cost_table_中的最后一行,其实就是在t=7那一行中找出cost最小的那个点赋值给best_end_point,这个点能够保证时间是从0-7s,但是
   // 最终距离不一定是s = 149.
   for (const StGraphPoint& cur_point : cost_table_.back()) {
