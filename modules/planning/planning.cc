@@ -196,6 +196,8 @@ Status Planning::Start() {
   // It is necessary to check its existence.
 
   // 如果reference_line_provider_存在就开启reference_line_provider_子线程
+  // 其实只有在 不使用navigation_mode 的时候才会启用 reference_line_provider_ 子线程,当使用
+  // navigation_mode的时候,每一个规划周期都会给reference_line_provider_赋新值
   if (reference_line_provider_) {
     reference_line_provider_->Start();
   }
@@ -280,6 +282,7 @@ void Planning::RunOnce() {
     // Prefer "std::make_unique" to direct use of "new".
     // Reference "https://herbsutter.com/gotw/_102/" for details.
     // std::make_unique<type>(value)相当于new type(value)这里会执行ReferenceLineProvider的构造函数
+    // 使用navigation_mode,每个规划周期都会给reference_line_provider_赋新值
     reference_line_provider_ = std::make_unique<ReferenceLineProvider>(hdmap_);
   }
 
@@ -298,7 +301,7 @@ void Planning::RunOnce() {
   
   // 如果采用的是navigation_mode 模式，那么就将上一个周期规划结果中的期望路径转移到当前周期车体坐标系下。
   if (FLAGS_use_navigation_mode) {
-  	//获取当前时刻车辆的位置和航向，大地坐标下
+  	//获取当前时刻在大地坐标下车辆的位置和航向
     auto vehicle_config = ComputeVehicleConfigFromLocalization(localization);
 
     if (last_vehicle_config_.is_valid_ && vehicle_config.is_valid_) {
